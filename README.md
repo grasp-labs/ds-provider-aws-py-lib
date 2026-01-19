@@ -1,9 +1,9 @@
 # ds-provider-aws-py-lib
 
-![Python Versions](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)
+![Python Versions](https://img.shields.io/badge/python-3.11%20|%203.12-blue)
 [![PyPI version](https://badge.fury.io/py/ds-provider-aws-py-lib.svg?kill_cache=1)](https://badge.fury.io/py/ds-provider-aws-py-lib)
 [![Build Status](https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml/badge.svg)](https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml)
-[![codecov](https://codecov.io/gh/grasp-labs/ds-provider-aws-py-lib/graph/badge.svg?token=EO3YCNCZFS)](https://codecov.io/gh/grasp-labs/ds-provider-aws-py-lib)
+[![codecov](https://codecov.io/gh/grasp-labs/https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml/graph/badge.svg?token=EO3YCNCZFS)](https://codecov.io/gh/grasp-labs/https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 DS package for ds-provider-aws-py-lib
@@ -135,7 +135,7 @@ uv run pytest tests/test_example.py -v
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.11+
 - [uv](https://github.com/astral-sh/uv) package manager
 - Make (for development commands)
 

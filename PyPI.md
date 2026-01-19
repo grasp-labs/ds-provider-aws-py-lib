@@ -44,7 +44,7 @@ import ds_provider_aws_py_lib
 
 ## Requirements
 
-- Python 3.9 or higher
+- Python 3.11 or higher
 - <!-- List any required dependencies -->
 
 ## Optional Dependencies
