@@ -1,6 +1,6 @@
 # ds-provider-aws-py-lib
 
-![Python Versions](https://img.shields.io/badge/python-3.11%20|%203.12-blue)
+![Python Versions](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13%20|%203.14-blue)
 [![PyPI version](https://badge.fury.io/py/ds-provider-aws-py-lib.svg?kill_cache=1)](https://badge.fury.io/py/ds-provider-aws-py-lib)
 [![Build Status](https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml/badge.svg)](https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml)
 [![codecov](https://codecov.io/gh/grasp-labs/https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml/graph/badge.svg?token=EO3YCNCZFS)](https://codecov.io/gh/grasp-labs/https://github.com/grasp-labs/ds-provider-aws-py-lib/actions/workflows/build.yaml)
