@@ -7,8 +7,6 @@ Constants for PostgreSQL provider.
 Example:
     >>> ResourceKind.LINKED_SERVICE
     'DS.RESOURCE.LINKED_SERVICE.AWS'
-    >>> ResourceKind.DATASET
-    'DS.RESOURCE.DATASET.AWS'
 """
 
 from enum import StrEnum
@@ -20,4 +18,3 @@ class ResourceKind(StrEnum):
     """
 
     LINKED_SERVICE = "DS.RESOURCE.LINKED_SERVICE.AWS"
-    DATASET = "DS.RESOURCE.DATASET.AWS"
