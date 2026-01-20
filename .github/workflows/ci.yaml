@@ -31,7 +31,7 @@ jobs:
       - name: Run tests with coverage (95% minimum)
         run: |
           make test-cov
-        with:
+        env:
           AWS-ACCESS-KEY-ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS-SECRET-ACCESS-KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
