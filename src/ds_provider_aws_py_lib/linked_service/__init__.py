@@ -2,9 +2,9 @@
 **File:** ``__init__.py``
 **Region:** ``ds_provider_aws_py_lib/linked_service``
 
-PostgreSQL Linked Service
+AWS Linked Service
 
-This module implements a linked service for AWS databases. Use it to get boto3 session.
+This module implements a linked service for AWS (for example, S3) and provides a boto3 session.
 
 Example:
     >>> aws_linked_service = AwsLinkedService(settings=AWSLinkedServiceSettings(
