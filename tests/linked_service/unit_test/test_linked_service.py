@@ -78,3 +78,47 @@ def test_test_connection_clienterror(monkeypatch):
 
     assert ok is False
     assert "denied" in msg
+
+
+def test_raises_on_account_id_mismatch(monkeypatch):
+    settings = AWSLinkedServiceSettings(
+        aws_account_id="expected-account-id",
+        access_key_id="AK",
+        access_key_secret="SK",
+    )
+
+    def fake_session(**kwargs):
+        return DummySession(aws_account_id="actual-account-id")
+
+    monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
+    ls = AWSLinkedService(settings=settings)
+    try:
+        ls.connect()
+    except Exception as exc:
+        assert "does not match expected value" in str(exc)
+
+
+def test_excepts_on_sts_client_error(monkeypatch):
+    settings = AWSLinkedServiceSettings(
+        aws_account_id="expected-account-id",
+        access_key_id="AK",
+        access_key_secret="SK",
+    )
+
+    def fake_session(**kwargs):
+        class BadSession:
+            def client(self, service: str):
+                class BadClient:
+                    def get_caller_identity(self):
+                        raise ClientError({"Error": {"Message": "STS error", "Code": "403"}}, "GetCallerIdentity")
+
+                return BadClient()
+
+        return BadSession()
+
+    monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
+    ls = AWSLinkedService(settings=settings)
+    try:
+        ls.connect()
+    except Exception as exc:
+        assert "Unable to verify AWS account ID" in str(exc)
