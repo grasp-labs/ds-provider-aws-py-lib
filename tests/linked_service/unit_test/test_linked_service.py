@@ -49,7 +49,7 @@ def test_connect_uses_settings(monkeypatch):
 
 
 def test_test_connection_success(monkeypatch):
-    settings = AWSLinkedServiceSettings()
+    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...)
 
     def fake_session(**kwargs):
         return DummySession(aws_account_id="999125116186")
@@ -63,7 +63,7 @@ def test_test_connection_success(monkeypatch):
 
 
 def test_test_connection_clienterror(monkeypatch):
-    settings = AWSLinkedServiceSettings()
+    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...)
 
     def fake_session(**kwargs):
         class BadSession:

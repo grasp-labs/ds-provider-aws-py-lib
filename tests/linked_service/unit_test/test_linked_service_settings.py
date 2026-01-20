@@ -22,12 +22,12 @@ def test_create_default_linked_service() -> None:
     """
     It creates an AwsLinkedService with default settings.
     """
-    props = AWSLinkedServiceSettings()
+    props = AWSLinkedServiceSettings(access_key_id="ABC", access_key_secret="DEF")
     linked_service = AWSLinkedService(settings=props)
     assert isinstance(linked_service, AWSLinkedService)
     assert linked_service.settings.aws_account_id == "999125116186"
-    assert linked_service.settings.access_key_id is None
-    assert linked_service.settings.access_key_secret is None
+    assert linked_service.settings.access_key_id == "ABC"
+    assert linked_service.settings.access_key_secret == "DEF"
     assert linked_service.settings.region == "eu-north-1"
 
 
@@ -35,7 +35,7 @@ def test_linked_service_kind_is_linked_service() -> None:
     """
     It exposes linked service kind.
     """
-    props = AWSLinkedServiceSettings(region="us-west-2")
+    props = AWSLinkedServiceSettings(region="us-west-2", access_key_id=..., access_key_secret=...)
     linked_service = AWSLinkedService(settings=props)
     assert linked_service.kind == ResourceKind.LINKED_SERVICE
     assert linked_service.settings.region == "us-west-2"
@@ -46,7 +46,7 @@ def test_session_and_client_none_before_connect() -> None:
     It returns None for session/client properties before connect() is called.
     Uses getattr to avoid failing if an attribute is not present.
     """
-    props = AWSLinkedServiceSettings()
+    props = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...)
     linked_service = AWSLinkedService(settings=props)
     assert getattr(linked_service, "session", None) is None
     assert getattr(linked_service, "s3_client", None) is None
@@ -57,10 +57,8 @@ def test_settings_initialization_defaults() -> None:
     """
     It initializes settings with default (None) values.
     """
-    props = AWSLinkedServiceSettings()
+    props = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...)
     assert props.aws_account_id == "999125116186"
-    assert props.access_key_id is None
-    assert props.access_key_secret is None
     assert props.region == "eu-north-1"
 
 
@@ -81,6 +79,6 @@ def test_settings_custom_values() -> None:
 
 
 def test_close_does_not_raise():
-    ls = AWSLinkedService(settings=AWSLinkedServiceSettings())
+    ls = AWSLinkedService(settings=AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...))
     with nullcontext():
         ls.close()

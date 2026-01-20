@@ -17,8 +17,8 @@ class AWSLinkedServiceSettings(LinkedServiceSettings):
     """
 
     aws_account_id: str = "999125116186"
-    access_key_id: str | None = None
-    access_key_secret: str | None = None
+    access_key_id: str | None
+    access_key_secret: str | None
     region: str = "eu-north-1"
 
 
