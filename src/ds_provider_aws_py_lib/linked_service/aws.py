@@ -83,7 +83,7 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
 
     def test_connection(self) -> tuple[bool, str]:
         """
-        Test the connection to AWS by listing S3 buckets.
+        Test the connection to AWS by creating the session.
         Returns:
             tuple[bool, str]: A tuple containing a boolean indicating success and a message.
         """
