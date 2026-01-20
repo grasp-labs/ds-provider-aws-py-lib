@@ -22,7 +22,8 @@ def test_connect_creates_session_and_clients():
     # given
     access_key_id = os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS-ACCESS-KEY-ID")
     access_key_secret = os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("AWS-SECRET-ACCESS-KEY")
-    settings = AWSLinkedServiceSettings(access_key_id=access_key_id, access_key_secret=access_key_secret)
+    account_id = os.environ.get("AWS_ACCOUNT_ID")
+    settings = AWSLinkedServiceSettings(access_key_id=access_key_id, access_key_secret=access_key_secret, account_id=account_id)
     aws_linked_service = AWSLinkedService(settings=settings)
     # when
     connection = aws_linked_service.connect()

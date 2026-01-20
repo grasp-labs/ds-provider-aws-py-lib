@@ -28,6 +28,7 @@ def main() -> None:
     """Main function demonstrating AWS linked service connection."""
     linked_service = AWSLinkedService(
         settings=AWSLinkedServiceSettings(
+            account_id="your_account_id",
             access_key_id="your_access_key_id",
             access_key_secret="your_access_key_secret",
             region="us-west-2",

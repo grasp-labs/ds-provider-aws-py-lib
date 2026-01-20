@@ -15,17 +15,25 @@ from ds_provider_aws_py_lib.linked_service.aws import AWSLinkedService, AWSLinke
 
 
 class DummyClient:
+    """
+    A dummy AWS client that simulates basic AWS client behavior for testing.
+    """
+
     def __init__(self, **kwargs):
-        self.aws_account_id = kwargs.get("aws_account_id")
+        self.account_id = kwargs.get("aws_account_id")
 
     def list_buckets(self):
         return {"Buckets": []}
 
     def get_caller_identity(self):
-        return {"Account": self.aws_account_id}
+        return {"Account": self.account_id}
 
 
 class DummySession:
+    """
+    A dummy AWS session that simulates basic AWS session behavior for testing.
+    """
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
@@ -34,8 +42,11 @@ class DummySession:
 
 
 def test_connect_uses_settings(monkeypatch):
+    """
+    Test that AWSLinkedService.connect() uses the settings to create a session.
+    """
     settings = AWSLinkedServiceSettings(
-        aws_account_id="123",
+        account_id="123",
         access_key_id="AK",
         access_key_secret="SK",
         region="us-west-2",
@@ -58,10 +69,13 @@ def test_connect_uses_settings(monkeypatch):
 
 
 def test_test_connection_success(monkeypatch):
-    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...)
+    """
+    Test that AWSLinkedService.test_connection() returns success (indicating that the client works).
+    """
+    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=..., account_id="321")
 
     def fake_session(**kwargs):
-        return DummySession(aws_account_id="999125116186")
+        return DummySession(aws_account_id="321")
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
     ls = AWSLinkedService(settings=settings)
@@ -72,7 +86,10 @@ def test_test_connection_success(monkeypatch):
 
 
 def test_test_connection_clienterror(monkeypatch):
-    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...)
+    """
+    Test that AWSLinkedService.test_connection() returns failure when the client raises ClientError.
+    """
+    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=..., account_id=...)
 
     def fake_session(**kwargs):
         class BadSession:
@@ -90,14 +107,17 @@ def test_test_connection_clienterror(monkeypatch):
 
 
 def test_raises_on_account_id_mismatch(monkeypatch):
+    """
+    Test that AWSLinkedService.connect() raises an error when the account ID does not match.
+    """
     settings = AWSLinkedServiceSettings(
-        aws_account_id="expected-account-id",
+        account_id="expected-account-id",
         access_key_id="AK",
         access_key_secret="SK",
     )
 
     def fake_session(**kwargs):
-        return DummySession(aws_account_id="actual-account-id")
+        return DummySession(account_id="actual-account-id")
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
     ls = AWSLinkedService(settings=settings)
@@ -108,8 +128,11 @@ def test_raises_on_account_id_mismatch(monkeypatch):
 
 
 def test_excepts_on_sts_client_error(monkeypatch):
+    """
+    Test that AWSLinkedService.connect() raises an error when the STS client fails
+    """
     settings = AWSLinkedServiceSettings(
-        aws_account_id="expected-account-id",
+        account_id="expected-account-id",
         access_key_id="AK",
         access_key_secret="SK",
     )

@@ -38,7 +38,7 @@ def test_connection_client_exception(monkeypatch):
     monkeypatch.setattr(aws_mod, "boto3", fake_boto3)
     monkeypatch.setattr(aws_mod, "Session", fake_session, raising=False)
 
-    ls = AWSLinkedService(settings=AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...))
+    ls = AWSLinkedService(settings=AWSLinkedServiceSettings(access_key_id=..., access_key_secret=..., account_id=...))
 
     try:
         ok, msg = ls.test_connection()
@@ -62,7 +62,7 @@ def test_connection_session_exception(monkeypatch):
     monkeypatch.setattr(aws_mod, "boto3", fake_boto3)
     monkeypatch.setattr(aws_mod, "Session", bad_session, raising=False)
 
-    ls = AWSLinkedService(settings=AWSLinkedServiceSettings(access_key_id=..., access_key_secret=...))
+    ls = AWSLinkedService(settings=AWSLinkedServiceSettings(access_key_id=..., access_key_secret=..., account_id=...))
 
     try:
         ok, msg = ls.test_connection()
