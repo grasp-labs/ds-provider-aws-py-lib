@@ -2,7 +2,7 @@
 **File:** ``enums.py``
 **Region:** ``ds_provider_aws_py_lib/enums``
 
-Constants for PostgreSQL provider.
+Constants for AWS provider.
 
 Example:
     >>> ResourceKind.LINKED_SERVICE
