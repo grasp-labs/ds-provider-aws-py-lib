@@ -44,7 +44,7 @@ aws = "ds_provider_aws_py_lib"
 [project.optional-dependencies]
 dev = [
     "bandit>=1.9.3",
-    "boto3-stubs~=1.42.30",
+    "boto3-stubs>=1.42.30,<2.0.0",
     "ruff>=0.1.8",
     "mypy>=1.7.0",
     "pytest>=7.4.0",
