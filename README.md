@@ -13,13 +13,13 @@ DS package for ds-provider-aws-py-lib
 ### Quick Setup
 
 ```shell
-# 3. Install dependencies
+# 1. Install dependencies
 uv sync --all-extras --dev
 
-# 4. Install pre-commit hooks
+# 2. Install pre-commit hooks
 uv run pre-commit install
 
-# 5. Verify setup
+# 3. Verify setup
 make test
 ```
 
