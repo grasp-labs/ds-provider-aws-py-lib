@@ -1,3 +1,12 @@
+"""
+**File:** ``test_linked_service.py``
+**Region:** ``tests/linked_service/unit_test``
+
+Description
+-----------
+Unit tests for AWS linked service connection and account ID verification.
+"""
+
 from __future__ import annotations
 
 from botocore.exceptions import ClientError

@@ -1,6 +1,6 @@
 """
 **File:** ``test_version.py``
-**Region:** ``ds-provider-aws-py-lib``
+**Region:** ``tests/test_version``
 
 Description
 -----------

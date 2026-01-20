@@ -1,4 +1,9 @@
 """
+**File:** ``test_linked_service_settings.py``
+**Region:** ``tests/linked_service/unit_test``
+
+Description
+-----------
 AWSLinkedService settings and initialization tests.
 
 Covers:

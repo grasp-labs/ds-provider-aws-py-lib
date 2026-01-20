@@ -1,3 +1,14 @@
+"""
+**File:** ``test_connection.py``
+**Region:** ``tests/linked_service/integration``
+
+Description
+-----------
+Integration tests that verify AWS linked service can connect and create clients. Environment variables needs to
+be set for AWS credentials:
+- AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+"""
+
 import os
 
 import pytest

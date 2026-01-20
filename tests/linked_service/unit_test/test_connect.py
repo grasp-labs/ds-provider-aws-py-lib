@@ -1,3 +1,12 @@
+"""
+**File:** ``test_connect.py``
+**Region:** ``tests/unit_test``
+
+Description
+-----------
+Unit tests for AWS linked service connection testing, focusing on exception handling.
+"""
+
 from __future__ import annotations
 
 import sys
