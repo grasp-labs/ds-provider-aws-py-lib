@@ -1,10 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Generic, TypeVar
 
 import boto3
 from botocore.exceptions import ClientError
 from ds_resource_plugin_py_lib.common.resource.linked_service import LinkedService, LinkedServiceSettings
+from ds_resource_plugin_py_lib.common.resource.linked_service.errors import AuthorizationError
 
 from ..enums import ResourceKind
 
@@ -34,15 +35,36 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
     """
 
     settings: AWSLinkedServiceSettingsType
+    session: boto3.Session | None = field(default=None, init=False, repr=False)
 
     def connect(self) -> boto3.Session:
-        session = boto3.Session(
+        self.session = boto3.Session(
             aws_account_id=self.settings.aws_account_id,
             region_name=self.settings.region,
             aws_access_key_id=self.settings.access_key_id,
             aws_secret_access_key=self.settings.access_key_secret,
         )
-        return session
+        if self.settings.aws_account_id:
+            sts_client = self.session.client("sts")
+            try:
+                identity = sts_client.get_caller_identity()
+                actual_account_id = identity.get("Account")
+            except ClientError as exc:
+                raise AuthorizationError(
+                    message="Unable to verify AWS account ID.",
+                    details={"expected_account_id": self.settings.aws_account_id},
+                ) from exc
+
+            if actual_account_id != self.settings.aws_account_id:
+                raise AuthorizationError(
+                    message="AWS account ID does not match expected value.",
+                    details={
+                        "expected_account_id": self.settings.aws_account_id,
+                        "actual_account_id": actual_account_id,
+                    },
+                )
+
+        return self.session
 
     def test_connection(self) -> tuple[bool, str]:
         try:

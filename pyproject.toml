@@ -8,9 +8,8 @@ version = "0.1.0-alpha.1"
 description = "A Python package from the DS library collection"
 dependencies = [
     "ds-resource-plugin-py-lib>=0.1.0a3,<1.0.0",
-    "boto3>=1.28.0",
-    "botocore>=1.31.0",
-    "boto3-stubs~=1.42.30"
+    "boto3>=1.37.0,<2.0.0",
+    "botocore>=1.31.0"
 ]
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -45,6 +44,7 @@ aws = "ds_provider_aws_py_lib" # todo
 [project.optional-dependencies] # todo
 dev = [
     "bandit>=1.9.3",
+    "boto3-stubs~=1.42.30",
     "ruff>=0.1.8",
     "mypy>=1.7.0",
     "pytest>=7.4.0",

@@ -6,8 +6,14 @@ from ds_provider_aws_py_lib.linked_service.aws import AWSLinkedService, AWSLinke
 
 
 class DummyClient:
+    def __init__(self, **kwargs):
+        self.aws_account_id = kwargs.get("aws_account_id")
+
     def list_buckets(self):
         return {"Buckets": []}
+
+    def get_caller_identity(self):
+        return {"Account": self.aws_account_id}
 
 
 class DummySession:
@@ -15,8 +21,7 @@ class DummySession:
         self.kwargs = kwargs
 
     def client(self, service: str):
-        assert service == "s3"
-        return DummyClient()
+        return DummyClient(**self.kwargs)
 
 
 def test_connect_uses_settings(monkeypatch):
@@ -47,7 +52,7 @@ def test_test_connection_success(monkeypatch):
     settings = AWSLinkedServiceSettings()
 
     def fake_session(**kwargs):
-        return DummySession()
+        return DummySession(aws_account_id="999125116186")
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
     ls = AWSLinkedService(settings=settings)
