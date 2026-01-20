@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from botocore.exceptions import ClientError
 
-from ds_provider_aws_py_lib.linked_service.aws import AwsLinkedService, AWSLinkedServiceSettings
+from ds_provider_aws_py_lib.linked_service.aws import AWSLinkedService, AWSLinkedServiceSettings
 
 
 class DummyClient:
@@ -33,7 +33,7 @@ def test_connect_uses_settings(monkeypatch):
         return DummySession(**kwargs)
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AwsLinkedService(settings=settings)
+    ls = AWSLinkedService(settings=settings)
     sess = ls.connect()
 
     assert isinstance(sess, DummySession)
@@ -50,7 +50,7 @@ def test_test_connection_success(monkeypatch):
         return DummySession()
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AwsLinkedService(settings=settings)
+    ls = AWSLinkedService(settings=settings)
     ok, msg = ls.test_connection()
 
     assert ok is True
@@ -68,7 +68,7 @@ def test_test_connection_clienterror(monkeypatch):
         return BadSession()
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AwsLinkedService(settings=settings)
+    ls = AWSLinkedService(settings=settings)
     ok, msg = ls.test_connection()
 
     assert ok is False

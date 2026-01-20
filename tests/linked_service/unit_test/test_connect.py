@@ -4,7 +4,7 @@ import sys
 import types
 
 import ds_provider_aws_py_lib.linked_service.aws as aws_mod
-from ds_provider_aws_py_lib.linked_service.aws import AwsLinkedService, AWSLinkedServiceSettings
+from ds_provider_aws_py_lib.linked_service.aws import AWSLinkedService, AWSLinkedServiceSettings
 
 
 def test_test_connection_client_exception(monkeypatch):
@@ -29,7 +29,7 @@ def test_test_connection_client_exception(monkeypatch):
     monkeypatch.setattr(aws_mod, "boto3", fake_boto3)
     monkeypatch.setattr(aws_mod, "Session", fake_session, raising=False)
 
-    ls = AwsLinkedService(settings=AWSLinkedServiceSettings())
+    ls = AWSLinkedService(settings=AWSLinkedServiceSettings())
 
     try:
         ok, msg = ls.test_connection()
@@ -53,7 +53,7 @@ def test_test_connection_session_exception(monkeypatch):
     monkeypatch.setattr(aws_mod, "boto3", fake_boto3)
     monkeypatch.setattr(aws_mod, "Session", bad_session, raising=False)
 
-    ls = AwsLinkedService(settings=AWSLinkedServiceSettings())
+    ls = AWSLinkedService(settings=AWSLinkedServiceSettings())
 
     try:
         ok, msg = ls.test_connection()

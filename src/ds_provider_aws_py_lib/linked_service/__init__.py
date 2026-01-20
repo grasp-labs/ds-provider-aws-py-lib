@@ -14,9 +14,9 @@ Example:
     >>> session = aws_linked_service.connect()
 """
 
-from .aws import AwsLinkedService, AWSLinkedServiceSettings
+from .aws import AWSLinkedService, AWSLinkedServiceSettings
 
 __all__ = [
+    "AWSLinkedService",
     "AWSLinkedServiceSettings",
-    "AwsLinkedService",
 ]

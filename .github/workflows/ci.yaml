@@ -31,6 +31,10 @@ jobs:
       - name: Run tests with coverage (95% minimum)
         run: |
           make test-cov
+        with:
+          AWS-ACCESS-KEY-ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS-SECRET-ACCESS-KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11'
