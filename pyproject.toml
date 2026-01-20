@@ -39,9 +39,9 @@ Issues = "https://github.com/grasp-labs/ds-provider-aws-py-lib/issues/"
 Changelog = "https://github.com/grasp-labs/ds-provider-aws-py-lib/releases"
 
 [project.entry-points."ds.providers"]
-aws = "ds_provider_aws_py_lib" # todo
+aws = "ds_provider_aws_py_lib"
 
-[project.optional-dependencies] # todo
+[project.optional-dependencies]
 dev = [
     "bandit>=1.9.3",
     "boto3-stubs~=1.42.30",
