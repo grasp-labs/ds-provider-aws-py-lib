@@ -25,7 +25,7 @@ logger = Logger.get_logger(__name__)
 
 
 def main() -> None:
-    """Main function demonstrating PostgreSQL linked service connection."""
+    """Main function demonstrating AWS linked service connection."""
     linked_service = AWSLinkedService(
         settings=AWSLinkedServiceSettings(
             access_key_id="your_access_key_id",
