@@ -31,7 +31,7 @@ AWSLinkedServiceSettingsType = TypeVar(
 @dataclass(kw_only=True)
 class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSLinkedServiceSettingsType]):
     """
-    The class is used to connect with AWS S3.
+    The class is used to connect with AWS services.
     """
 
     settings: AWSLinkedServiceSettingsType
