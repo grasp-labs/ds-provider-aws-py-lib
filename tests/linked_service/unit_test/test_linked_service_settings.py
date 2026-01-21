@@ -7,7 +7,7 @@ Description
 AWSLinkedService settings and initialization tests.
 
 Covers:
-- Linked service kind.
+- Linked service type.
 - Session / client access before connection.
 - Settings initialization and default values.
 """
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 
-from ds_provider_aws_py_lib.enums import ResourceKind
+from ds_provider_aws_py_lib.enums import ResourceType
 from ds_provider_aws_py_lib.linked_service.aws import (
     AWSLinkedService,
     AWSLinkedServiceSettings,
@@ -37,13 +37,13 @@ def test_create_default_linked_service() -> None:
     assert linked_service.settings.region == "eu-north-1"
 
 
-def test_linked_service_kind_is_linked_service() -> None:
+def test_linked_service_type_is_linked_service() -> None:
     """
-    It exposes linked service kind.
+    It exposes linked service type.
     """
     props = AWSLinkedServiceSettings(region="us-west-2", access_key_id=..., access_key_secret=..., account_id=...)
     linked_service = AWSLinkedService(settings=props)
-    assert linked_service.kind == ResourceKind.LINKED_SERVICE
+    assert linked_service.type == ResourceType.LINKED_SERVICE
     assert linked_service.settings.region == "us-west-2"
 
 

@@ -553,7 +553,7 @@ requires-dist = [
     { name = "boto3-stubs", marker = "extra == 'dev'", specifier = ">=1.42.30,<2.0.0" },
     { name = "botocore", specifier = ">=1.31.0" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.0.0" },
-    { name = "ds-resource-plugin-py-lib", specifier = ">=0.1.0a3,<1.0.0" },
+    { name = "ds-resource-plugin-py-lib", specifier = ">=0.1.0a4,<1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.6.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
@@ -575,7 +575,7 @@ provides-extras = ["dev", "test", "docs"]
 
 [[package]]
 name = "ds-resource-plugin-py-lib"
-version = "0.1.0a3"
+version = "0.1.0a4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "awswrangler" },
@@ -585,9 +585,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/45/98ed6bfde263f9148b83db80ddfcb256cb5a6e303b7d4c956b6b1d5ac4df/ds_resource_plugin_py_lib-0.1.0a3.tar.gz", hash = "sha256:dbf2efd07357d16dc24eb0e43eabdc38ee62b52684a7569a21d61c931b166667", size = 18870, upload-time = "2026-01-18T17:30:19.138Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/61/b919842b98f0c0a06c2fd56b3871bbd1d5a3181cdb5e485545d7237aee57/ds_resource_plugin_py_lib-0.1.0a4.tar.gz", hash = "sha256:f68f531af44f5c328ed0d878638575dede535a75b88baee91fe8cb74fe173ba1", size = 18876, upload-time = "2026-01-21T12:11:44.745Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/b5/9d6d7de0304689f7e7263147b57c33c38d12d89697846a7098d8766c5579/ds_resource_plugin_py_lib-0.1.0a3-py3-none-any.whl", hash = "sha256:0e1e564b4f08fb81745eed6f62f7d492bb44b27ff4353f2546794c7cf6e21dba", size = 26079, upload-time = "2026-01-18T17:30:17.826Z" },
+    { url = "https://files.pythonhosted.org/packages/65/28/14ef0b2091d342fcfcd509c14b5e38575dba41c76a0700b46399b7ca06df/ds_resource_plugin_py_lib-0.1.0a4-py3-none-any.whl", hash = "sha256:022b5f583e7d656a594fc872be80c518511c77c319ca06c20e4031693d620ea3", size = 26074, upload-time = "2026-01-21T12:11:43.672Z" },
 ]
 
 [[package]]

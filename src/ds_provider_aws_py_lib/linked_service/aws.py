@@ -16,7 +16,7 @@ from botocore.exceptions import ClientError
 from ds_resource_plugin_py_lib.common.resource.linked_service import LinkedService, LinkedServiceSettings
 from ds_resource_plugin_py_lib.common.resource.linked_service.errors import AuthorizationError
 
-from ..enums import ResourceKind
+from ..enums import ResourceType
 
 
 @dataclass(kw_only=True)
@@ -101,10 +101,10 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
         pass
 
     @property
-    def kind(self) -> StrEnum:
+    def type(self) -> StrEnum:
         """
-        Get the kind of the linked service.
+        Get the type of the linked service.
         Returns:
-            ResourceKind
+            ResourceType
         """
-        return ResourceKind.LINKED_SERVICE
+        return ResourceType.LINKED_SERVICE

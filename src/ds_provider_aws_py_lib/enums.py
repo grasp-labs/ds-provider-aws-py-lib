@@ -5,14 +5,14 @@
 Constants for AWS provider.
 
 Example:
-    >>> ResourceKind.LINKED_SERVICE
+    >>> ResourceType.LINKED_SERVICE
     'DS.RESOURCE.LINKED_SERVICE.AWS'
 """
 
 from enum import StrEnum
 
 
-class ResourceKind(StrEnum):
+class ResourceType(StrEnum):
     """
     Constants for AWS provider.
     """

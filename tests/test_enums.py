@@ -2,7 +2,7 @@
 **File:** ``test_enums.py``
 **Region:** ``tests/test_enums``
 
-ResourceKind enum tests.
+ResourceType enum tests.
 
 Covers:
 - Enum value definitions and string representations.
@@ -11,26 +11,26 @@ Covers:
 
 from __future__ import annotations
 
-from ds_provider_aws_py_lib.enums import ResourceKind
+from ds_provider_aws_py_lib.enums import ResourceType
 
 
-def test_resource_kind_linked_service_value() -> None:
+def test_resource_type_linked_service_value() -> None:
     """
-    It exposes the correct linked service kind value.
+    It exposes the correct linked service type value.
     """
-    assert ResourceKind.LINKED_SERVICE == "DS.RESOURCE.LINKED_SERVICE.AWS"
-    assert isinstance(ResourceKind.LINKED_SERVICE, str)
+    assert ResourceType.LINKED_SERVICE == "DS.RESOURCE.LINKED_SERVICE.AWS"
+    assert isinstance(ResourceType.LINKED_SERVICE, str)
 
 
-def test_resource_kind_enum_membership() -> None:
+def test_resource_type_enum_membership() -> None:
     """
     It allows checking enum membership.
     """
-    assert ResourceKind.LINKED_SERVICE in ResourceKind
+    assert ResourceType.LINKED_SERVICE in ResourceType
 
 
-def test_resource_kind_enum_comparison() -> None:
+def test_resource_type_enum_comparison() -> None:
     """
     It supports equality comparison with strings.
     """
-    assert ResourceKind.LINKED_SERVICE == "DS.RESOURCE.LINKED_SERVICE.AWS"
+    assert ResourceType.LINKED_SERVICE == "DS.RESOURCE.LINKED_SERVICE.AWS"
