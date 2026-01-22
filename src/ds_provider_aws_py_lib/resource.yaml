@@ -1,0 +1,10 @@
+package-name: aws
+name: aws
+description: AWS provider for the DS Business Workflow
+
+linked_service:
+  - name: AWS
+    kind: DS.RESOURCE.LINKED_SERVICE.AWS
+    version: 1.0.0
+    description: AWS linked service
+    class_name: ds_provider_aws_py_lib.linked_service.aws.AWSLinkedService
