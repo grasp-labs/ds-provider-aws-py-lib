@@ -57,7 +57,11 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
         Raises:
             AuthorizationError: If the AWS account ID does not match the expected value.
         """
-        logger.debug(f"Connecting to AWS account_id={self.settings.account_id} in region={self.settings.region}")
+        logger.debug(
+            "Connecting to AWS account_id=%s in region=%s",
+            self.settings.account_id,
+            self.settings.region,
+        )
         self.session = boto3.Session(
             aws_account_id=self.settings.account_id,
             region_name=self.settings.region,
@@ -69,7 +73,7 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
             identity = sts_client.get_caller_identity()
             actual_account_id = identity.get("Account")
         except ClientError as exc:
-            logger.error(f"Unable to verify AWS account ID: {exc!s}")
+            logger.error("Unable to verify AWS account ID: %s", exc)
             raise AuthorizationError(
                 message="Unable to verify AWS account ID.",
                 details={"expected_account_id": self.settings.account_id},

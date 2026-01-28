@@ -41,14 +41,14 @@ def main() -> None:
         logger.debug("Testing connection...")
         success, message = linked_service.test_connection()
         if success:
-            logger.debug(f"Connection test successful: {message}")
+            logger.debug("Connection test successful: %s", message)
         else:
             raise ResourceException(message=message)
     except ResourceException as exc:
-        logger.error(f"Failed to connect to AWS: {exc.message}")
+        logger.error("Failed to connect to AWS: %s", exc.message)
         raise
     except Exception as exc:
-        logger.error(f"Unexpected error: {exc!s}")
+        logger.error("Unexpected error: %s", exc)
         raise
 
 
