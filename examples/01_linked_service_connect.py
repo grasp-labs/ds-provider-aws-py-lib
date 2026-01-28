@@ -20,8 +20,7 @@ from ds_provider_aws_py_lib.linked_service.aws import (
     AWSLinkedServiceSettings,
 )
 
-Logger()
-logger = Logger.get_logger(__name__)
+logger = Logger.get_logger(__name__, package=True)
 
 
 def main() -> None:
@@ -36,20 +35,20 @@ def main() -> None:
     )
 
     try:
-        logger.info("Connecting to AWS...")
+        logger.debug("Connecting to AWS...")
         linked_service.connect()
 
-        logger.info("Testing connection...")
+        logger.debug("Testing connection...")
         success, message = linked_service.test_connection()
         if success:
-            logger.info(f"Connection test successful: {message}")
+            logger.debug("Connection test successful: %s", message)
         else:
             raise ResourceException(message=message)
     except ResourceException as exc:
-        logger.error(f"Failed to connect to AWS: {exc.message}")
+        logger.error("Failed to connect to AWS: %s", exc.message)
         raise
     except Exception as exc:
-        logger.error(f"Unexpected error: {exc!s}")
+        logger.error("Unexpected error: %s", exc)
         raise
 
 

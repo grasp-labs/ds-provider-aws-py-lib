@@ -13,10 +13,13 @@ from typing import Generic, TypeVar
 
 import boto3
 from botocore.exceptions import ClientError
+from ds_common_logger_py_lib import Logger
 from ds_resource_plugin_py_lib.common.resource.linked_service import LinkedService, LinkedServiceSettings
 from ds_resource_plugin_py_lib.common.resource.linked_service.errors import AuthorizationError
 
 from ..enums import ResourceType
+
+logger = Logger.get_logger(__name__, package=True)
 
 
 @dataclass(kw_only=True)
@@ -54,6 +57,11 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
         Raises:
             AuthorizationError: If the AWS account ID does not match the expected value.
         """
+        logger.debug(
+            "Connecting to AWS account_id=%s in region=%s",
+            self.settings.account_id,
+            self.settings.region,
+        )
         self.session = boto3.Session(
             aws_account_id=self.settings.account_id,
             region_name=self.settings.region,
@@ -65,6 +73,7 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
             identity = sts_client.get_caller_identity()
             actual_account_id = identity.get("Account")
         except ClientError as exc:
+            logger.error("Unable to verify AWS account ID: %s", exc)
             raise AuthorizationError(
                 message="Unable to verify AWS account ID.",
                 details={"expected_account_id": self.settings.account_id},
