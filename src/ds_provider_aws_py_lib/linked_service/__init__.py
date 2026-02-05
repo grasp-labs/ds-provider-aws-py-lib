@@ -7,7 +7,7 @@ AWS Linked Service
 This module implements a linked service for AWS (for example, S3) and provides a boto3 session.
 
 Example:
-    >>> inked_service = AWSLinkedService(
+    >>> linked_service = AWSLinkedService(
     ...     id=UUID("00000000-0000-0000-0000-000000000000"),
     ...     name="test-name",
     ...     version="1.0.0",
