@@ -32,7 +32,6 @@ def test_create_default_linked_service() -> None:
     """
     props = AWSLinkedServiceSettings(access_key_id="ABC", access_key_secret="DEF", account_id="123")
     linked_service = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=props)
-    linked_service = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=props)
     assert isinstance(linked_service, AWSLinkedService)
     assert linked_service.settings.account_id == "123"
     assert linked_service.settings.access_key_id == "ABC"
