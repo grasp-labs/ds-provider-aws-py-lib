@@ -12,6 +12,8 @@ This example demonstrates how to:
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from ds_common_logger_py_lib import Logger
 from ds_resource_plugin_py_lib.common.resource.errors import ResourceException
 
@@ -26,6 +28,9 @@ logger = Logger.get_logger(__name__, package=True)
 def main() -> None:
     """Main function demonstrating AWS linked service connection."""
     linked_service = AWSLinkedService(
+        id=UUID("00000000-0000-0000-0000-000000000000"),
+        name="test-name",
+        version="1.0.0",
         settings=AWSLinkedServiceSettings(
             account_id="your_account_id",
             access_key_id="your_access_key_id",
