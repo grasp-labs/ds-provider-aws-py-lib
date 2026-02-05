@@ -9,9 +9,13 @@ Unit tests for AWS linked service connection and account ID verification.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from botocore.exceptions import ClientError
 
 from ds_provider_aws_py_lib.linked_service.aws import AWSLinkedService, AWSLinkedServiceSettings
+
+TEST_UUID = UUID("00000000-0000-0000-0000-000000000000")
 
 
 class DummyClient:
@@ -58,7 +62,7 @@ def test_connect_uses_settings(monkeypatch):
         return DummySession(**kwargs)
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AWSLinkedService(settings=settings)
+    ls = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=settings)
     sess = ls.connect()
 
     assert isinstance(sess, DummySession)
@@ -78,7 +82,7 @@ def test_test_connection_success(monkeypatch):
         return DummySession(aws_account_id="321")
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AWSLinkedService(settings=settings)
+    ls = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=settings)
     ok, msg = ls.test_connection()
 
     assert ok is True
@@ -99,7 +103,7 @@ def test_test_connection_clienterror(monkeypatch):
         return BadSession()
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AWSLinkedService(settings=settings)
+    ls = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=settings)
     ok, msg = ls.test_connection()
 
     assert ok is False
@@ -120,7 +124,7 @@ def test_raises_on_account_id_mismatch(monkeypatch):
         return DummySession(account_id="actual-account-id")
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AWSLinkedService(settings=settings)
+    ls = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=settings)
     try:
         ls.connect()
     except Exception as exc:
@@ -149,7 +153,7 @@ def test_excepts_on_sts_client_error(monkeypatch):
         return BadSession()
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
-    ls = AWSLinkedService(settings=settings)
+    ls = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=settings)
     try:
         ls.connect()
     except Exception as exc:
