@@ -8,7 +8,6 @@ This module implements a linked service for AWS.
 """
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Generic, TypeVar
 
 import boto3
@@ -29,9 +28,13 @@ class AWSLinkedServiceSettings(LinkedServiceSettings):
     """
 
     account_id: str
+    """The AWS account ID."""
     access_key_id: str
-    access_key_secret: str
+    """The AWS access key ID."""
+    access_key_secret: str = field(metadata={"mask": True})
+    """The AWS access key secret."""
     region: str = "eu-north-1"
+    """The AWS region."""
 
 
 AWSLinkedServiceSettingsType = TypeVar(
@@ -47,13 +50,25 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
     """
 
     settings: AWSLinkedServiceSettingsType
-    session: boto3.Session | None = field(default=None, init=False, repr=False)
+    session: boto3.Session | None = field(default=None, init=False, repr=False, metadata={"serialize": False})
+
+    @property
+    def type(self) -> ResourceType:
+        """
+        Get the type of the linked service.
+
+        Returns:
+            ResourceType
+        """
+        return ResourceType.LINKED_SERVICE
 
     def connect(self) -> boto3.Session:
         """
         Create a boto3 session using the provided AWS credentials and verify the account ID if specified.
+
         Returns:
             boto3.Session: The established boto3 session.
+
         Raises:
             AuthorizationError: If the AWS account ID does not match the expected value.
         """
@@ -76,14 +91,18 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
             logger.error("Unable to verify AWS account ID: %s", exc)
             raise AuthorizationError(
                 message="Unable to verify AWS account ID.",
-                details={"expected_account_id": self.settings.account_id},
+                details={
+                    "type": self.type.value,
+                    "expected_account_id": self.settings.account_id,
+                },
             ) from exc
 
         if actual_account_id != self.settings.account_id:
             raise AuthorizationError(
-                message=f"Unable to verify AWS account ID. "
+                message=f"Unable to verify AWS account ID."
                 f"{actual_account_id} does not match expected value: {self.settings.account_id}",
                 details={
+                    "type": self.type.value,
                     "expected_account_id": self.settings.account_id,
                     "actual_account_id": actual_account_id,
                 },
@@ -94,6 +113,7 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
     def test_connection(self) -> tuple[bool, str]:
         """
         Test the connection to AWS by creating the session.
+
         Returns:
             tuple[bool, str]: A tuple containing a boolean indicating success and a message.
         """
@@ -108,12 +128,3 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
         boto3 sessions do not require explicit closing.
         """
         pass
-
-    @property
-    def type(self) -> StrEnum:
-        """
-        Get the type of the linked service.
-        Returns:
-            ResourceType
-        """
-        return ResourceType.LINKED_SERVICE
