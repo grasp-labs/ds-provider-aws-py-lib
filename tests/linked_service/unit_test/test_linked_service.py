@@ -63,9 +63,9 @@ def test_connect_uses_settings(monkeypatch):
 
     monkeypatch.setattr("ds_provider_aws_py_lib.linked_service.aws.boto3.Session", fake_session)
     ls = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=settings)
-    sess = ls.connect()
+    ls.connect()
 
-    assert isinstance(sess, DummySession)
+    assert isinstance(ls.connection, DummySession)
     assert captured["aws_account_id"] == "123"
     assert captured["aws_access_key_id"] == "AK"
     assert captured["aws_secret_access_key"] == "SK"
@@ -76,7 +76,7 @@ def test_test_connection_success(monkeypatch):
     """
     Test that AWSLinkedService.test_connection() returns success (indicating that the client works).
     """
-    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=..., account_id="321")
+    settings = AWSLinkedServiceSettings(access_key_id="AK", access_key_secret="SK", account_id="321")
 
     def fake_session(**kwargs):
         return DummySession(aws_account_id="321")
@@ -93,7 +93,7 @@ def test_test_connection_clienterror(monkeypatch):
     """
     Test that AWSLinkedService.test_connection() returns failure when the client raises ClientError.
     """
-    settings = AWSLinkedServiceSettings(access_key_id=..., access_key_secret=..., account_id=...)
+    settings = AWSLinkedServiceSettings(access_key_id="AK", access_key_secret="SK", account_id="321")
 
     def fake_session(**kwargs):
         class BadSession:

@@ -18,7 +18,7 @@ def test_resource_type_linked_service_value() -> None:
     """
     It exposes the correct linked service type value.
     """
-    assert ResourceType.LINKED_SERVICE == "DS.RESOURCE.LINKED_SERVICE.AWS"
+    assert ResourceType.LINKED_SERVICE == "ds.resource.linked_service.aws"
     assert isinstance(ResourceType.LINKED_SERVICE, str)
 
 
@@ -33,4 +33,4 @@ def test_resource_type_enum_comparison() -> None:
     """
     It supports equality comparison with strings.
     """
-    assert ResourceType.LINKED_SERVICE == "DS.RESOURCE.LINKED_SERVICE.AWS"
+    assert ResourceType.LINKED_SERVICE == "ds.resource.linked_service.aws"
