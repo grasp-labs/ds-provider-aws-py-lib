@@ -14,7 +14,7 @@ import boto3
 from botocore.exceptions import ClientError
 from ds_common_logger_py_lib import Logger
 from ds_resource_plugin_py_lib.common.resource.linked_service import LinkedService, LinkedServiceSettings
-from ds_resource_plugin_py_lib.common.resource.linked_service.errors import AuthorizationError
+from ds_resource_plugin_py_lib.common.resource.linked_service.errors import AuthorizationError, ConnectionError
 
 from ..enums import ResourceType
 
@@ -50,7 +50,7 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
     """
 
     settings: AWSLinkedServiceSettingsType
-    session: boto3.Session | None = field(default=None, init=False, repr=False, metadata={"serialize": False})
+    _connection: boto3.Session | None = field(default=None, init=False, repr=False, metadata={"serialize": False})
 
     @property
     def type(self) -> ResourceType:
@@ -62,12 +62,21 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
         """
         return ResourceType.LINKED_SERVICE
 
-    def connect(self) -> boto3.Session:
+    @property
+    def connection(self) -> boto3.Session:
         """
-        Create a boto3 session using the provided AWS credentials and verify the account ID if specified.
+        Get the connection to AWS.
 
         Returns:
             boto3.Session: The established boto3 session.
+        """
+        if self._connection is None:
+            raise ConnectionError("No AWS session available. Call connect() first.")
+        return self._connection
+
+    def connect(self) -> None:
+        """
+        Create a boto3 session using the provided AWS credentials and verify the account ID if specified.
 
         Raises:
             AuthorizationError: If the AWS account ID does not match the expected value.
@@ -77,13 +86,13 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
             self.settings.account_id,
             self.settings.region,
         )
-        self.session = boto3.Session(
+        session = boto3.Session(
             aws_account_id=self.settings.account_id,
             region_name=self.settings.region,
             aws_access_key_id=self.settings.access_key_id,
             aws_secret_access_key=self.settings.access_key_secret,
         )
-        sts_client = self.session.client("sts")
+        sts_client = session.client("sts")
         try:
             identity = sts_client.get_caller_identity()
             actual_account_id = identity.get("Account")
@@ -99,7 +108,7 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
 
         if actual_account_id != self.settings.account_id:
             raise AuthorizationError(
-                message=f"Unable to verify AWS account ID."
+                message=f"Unable to verify AWS account ID. "
                 f"{actual_account_id} does not match expected value: {self.settings.account_id}",
                 details={
                     "type": self.type.value,
@@ -107,8 +116,7 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
                     "actual_account_id": actual_account_id,
                 },
             )
-
-        return self.session
+        self._connection = session
 
     def test_connection(self) -> tuple[bool, str]:
         """
