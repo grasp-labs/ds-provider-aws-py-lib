@@ -6,7 +6,7 @@ Constants for AWS provider.
 
 Example:
     >>> ResourceType.LINKED_SERVICE
-    'DS.RESOURCE.LINKED_SERVICE.AWS'
+    'ds.resource.linked_service.aws'
 """
 
 from enum import StrEnum
@@ -17,4 +17,4 @@ class ResourceType(StrEnum):
     Constants for AWS provider.
     """
 
-    LINKED_SERVICE = "DS.RESOURCE.LINKED_SERVICE.AWS"
+    LINKED_SERVICE = "ds.resource.linked_service.aws"

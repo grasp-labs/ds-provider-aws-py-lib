@@ -18,7 +18,6 @@ Example:
     ...         region="us-west-2",
     ...     ),
     ... )
-    >>> linked_service.connect()
     >>> linked_service.test_connection()
 """
 

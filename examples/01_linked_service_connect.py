@@ -40,9 +40,6 @@ def main() -> None:
     )
 
     try:
-        logger.debug("Connecting to AWS...")
-        linked_service.connect()
-
         logger.debug("Testing connection...")
         success, message = linked_service.test_connection()
         if success:

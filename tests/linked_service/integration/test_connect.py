@@ -32,11 +32,14 @@ def test_connect_creates_session_and_clients():
     access_key_id = os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS-ACCESS-KEY-ID")
     access_key_secret = os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("AWS-SECRET-ACCESS-KEY")
     account_id = os.environ.get("AWS_ACCOUNT_ID") or os.environ.get("AWS-ACCOUNT-ID")
+    assert access_key_id is not None
+    assert access_key_secret is not None
+    assert account_id is not None
     settings = AWSLinkedServiceSettings(access_key_id=access_key_id, access_key_secret=access_key_secret, account_id=account_id)
     aws_linked_service = AWSLinkedService(id=TEST_UUID, name="test-name", version="1.0.0", settings=settings)
     # when
-    connection = aws_linked_service.connect()
-    result = connection.client("sts").get_caller_identity()
+    aws_linked_service.connect()
+    result = aws_linked_service.connection.client("sts").get_caller_identity()
     # then
     assert "Account" in result
     assert "UserId" in result
