@@ -4,7 +4,7 @@ description: AWS provider for the DS Business Workflow
 
 linked_service:
   - name: AWS
-    kind: ds.resource.linked-service.aws
+    type: ds.resource.linked-service.aws
     version: 1.0.0
     description: AWS linked service
     class_name: ds_provider_aws_py_lib.linked_service.aws.AWSLinkedService
