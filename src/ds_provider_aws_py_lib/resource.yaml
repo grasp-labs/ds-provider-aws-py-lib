@@ -7,4 +7,4 @@ linked_service:
     kind: ds.resource.linked_service.aws
     version: 1.0.0
     description: AWS linked service
-    class_name: ds_provider_aws_py_lib.linked_service.aws.AWSLinkedService
+    class_name: ds_provider_aws_py_lib.linked-service.aws.AWSLinkedService
