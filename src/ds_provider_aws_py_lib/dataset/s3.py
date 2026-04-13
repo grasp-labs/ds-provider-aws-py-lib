@@ -1,0 +1,580 @@
+import io
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from typing import Any, Generic, NoReturn, Protocol, TypeVar, cast
+
+import pandas as pd
+from botocore.exceptions import ClientError
+from ds_common_logger_py_lib import Logger
+from ds_resource_plugin_py_lib.common.resource.dataset import (
+    DatasetSettings,
+    DatasetStorageFormatType,
+    TabularDataset,
+)
+from ds_resource_plugin_py_lib.common.resource.dataset.errors import CreateError, ListError, PurgeError, ReadError
+from ds_resource_plugin_py_lib.common.resource.errors import NotSupportedError
+from ds_resource_plugin_py_lib.common.serde.deserialize import PandasDeserializer
+from ds_resource_plugin_py_lib.common.serde.serialize import PandasSerializer
+
+from ds_provider_aws_py_lib.enums import ResourceType
+from ds_provider_aws_py_lib.linked_service import AWSLinkedService
+
+logger = Logger.get_logger(__name__, package=True)
+
+DatasetMethodError = type[ReadError] | type[ListError] | type[CreateError] | type[PurgeError]
+
+
+class S3ObjectBody(Protocol):
+    def read(self, amt: int | None = None) -> bytes | bytearray: ...
+
+
+class S3Paginator(Protocol):
+    def paginate(self, **kwargs: object) -> Iterable[dict[str, Any]]: ...
+
+
+class S3ClientProtocol(Protocol):
+    def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> dict[str, Any]: ...
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]: ...
+    def head_bucket(self, *, Bucket: str) -> dict[str, Any]: ...
+    def create_bucket(self, *, Bucket: str) -> dict[str, Any]: ...
+    def get_paginator(self, operation_name: str) -> S3Paginator: ...
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]: ...
+    def delete_objects(self, *, Bucket: str, Delete: dict[str, Any]) -> dict[str, Any]: ...
+    def delete_bucket(self, *, Bucket: str) -> dict[str, Any]: ...
+
+
+@dataclass(kw_only=True)
+class S3DatasetSettings(DatasetSettings):
+    """
+    Settings for PostgreSQL dataset operations.
+
+    The `read` settings contains read-specific configuration that only
+    applies to the read() operation, not to create(), delete(), update(), etc.
+    """
+
+    path: str
+    remove_bucket: bool = False
+    create_bucket: bool = False
+    content: io.BytesIO | None = None
+
+
+S3DatasetSettingsType = TypeVar(
+    "S3DatasetSettingsType",
+    bound=S3DatasetSettings,
+)
+AWSLinkedServiceType = TypeVar(
+    "AWSLinkedServiceType",
+    bound=AWSLinkedService[Any],
+)
+
+
+@dataclass(kw_only=True)
+class S3Dataset(
+    TabularDataset[
+        AWSLinkedServiceType,
+        S3DatasetSettingsType,
+        PandasSerializer,
+        PandasDeserializer,
+    ],
+    Generic[AWSLinkedServiceType, S3DatasetSettingsType],
+):
+    linked_service: AWSLinkedServiceType
+    settings: S3DatasetSettingsType
+
+    serializer: PandasSerializer | None = field(
+        default_factory=lambda: PandasSerializer(format=DatasetStorageFormatType.CSV),
+    )
+    deserializer: PandasDeserializer | None = field(
+        default_factory=lambda: PandasDeserializer(format=DatasetStorageFormatType.CSV),
+    )
+
+    @property
+    def type(self) -> ResourceType:
+        """Resource type for this dataset."""
+        return ResourceType.S3_DATASET
+
+    def create(self) -> None:
+        """Create/write the current input DataFrame to the configured S3 object."""
+        logger.debug(
+            "Starting create operation for %s ;account: %s",
+            self.settings.path,
+            self.linked_service.settings.account_id,
+        )
+
+        if self._should_skip_create():
+            self.output = self._build_create_output()
+            return
+
+        bucket, key = self._parse_s3_path(self.settings.path, CreateError)
+
+        self._validate_create_sources(bucket, key)
+        self._ensure_bucket_exists(bucket)
+        self._ensure_directory_exists(bucket, key)
+        self._ensure_object_does_not_exist(bucket, key)
+
+        body = self._build_create_body(bucket, key)
+        self._upload_create_body(bucket, key, body)
+        self.output = self._build_create_output()
+
+    def _should_skip_create(self) -> bool:
+        """Return True when create() has nothing to do under the contract."""
+        input_df = self._get_input_dataframe()
+        return self.settings.content is None and (input_df is None or input_df.empty)
+
+    def _get_input_dataframe(self) -> pd.DataFrame | None:
+        """Return input narrowed to DataFrame | None for create-flow checks."""
+        return cast("pd.DataFrame | None", self.input)
+
+    def _build_create_output(self) -> pd.DataFrame:
+        """Return contract-aligned create output without mutating self.input."""
+        input_df = self._get_input_dataframe()
+        if input_df is None:
+            return pd.DataFrame()
+        return input_df.copy()
+
+    def _validate_create_sources(self, bucket: str, key: str) -> None:
+        """Validate mutually exclusive create sources: content vs input."""
+        input_df = self._get_input_dataframe()
+        has_input_payload = input_df is not None and not input_df.empty
+        if self.settings.content is not None and has_input_payload:
+            raise CreateError(
+                message="Both settings.content and input are provided. Provide only one source.",
+                details={"bucket": bucket, "key": key},
+            )
+
+    def _build_create_body(self, bucket: str, key: str) -> bytes:
+        """Build upload body from settings.content or serialized input."""
+        if self.settings.content is not None:
+            return self.settings.content.getvalue()
+
+        if self.serializer is None:
+            raise CreateError(
+                message="Serializer is not initialized.",
+                status_code=400,
+                details={"path": getattr(self.settings, "path", None)},
+            )
+
+        input_df = self._get_input_dataframe()
+        if input_df is None:
+            raise CreateError(
+                message="Input is None. Provide input DataFrame or settings.content.",
+                status_code=400,
+                details={"bucket": bucket, "key": key},
+            )
+
+        try:
+            serialized = self.serializer(input_df)
+        except Exception as exc:
+            raise CreateError(
+                message="Failed to serialize input for S3 upload.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
+
+        if isinstance(serialized, str):
+            return serialized.encode("utf-8")
+        if isinstance(serialized, (bytes, bytearray)):
+            return bytes(serialized)
+
+        raise CreateError(
+            message="Unsupported serialized payload type for S3 upload.",
+            details={"type": type(serialized).__name__, "bucket": bucket, "key": key},
+        )
+
+    def _upload_create_body(self, bucket: str, key: str, body: bytes) -> None:
+        """Upload bytes to S3."""
+        s3_client = self._get_s3_client(CreateError)
+        try:
+            s3_client.put_object(Bucket=bucket, Key=key, Body=body)
+        except ClientError as exc:
+            logger.error("Failed to upload object s3://%s/%s: %s", bucket, key, exc)
+            raise CreateError(
+                message="Failed to upload object to S3.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
+
+    def _ensure_object_does_not_exist(self, bucket: str, key: str) -> None:
+        """Enforce additive-only create by rejecting overwrite of existing object."""
+        s3_client = self._get_s3_client(CreateError)
+        try:
+            s3_client.head_object(Bucket=bucket, Key=key)
+            raise CreateError(
+                message="Target object already exists. create() must not overwrite existing data.",
+                status_code=409,
+                details={"bucket": bucket, "key": key},
+            )
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            not_found = status_code == 404 or error_code in ("404", "NotFound", "NoSuchKey")
+            if not not_found:
+                raise CreateError(
+                    message="Unable to validate target object existence.",
+                    details={"bucket": bucket, "key": key, "error_code": error_code},
+                ) from exc
+
+    def _ensure_bucket_exists(self, bucket: str) -> None:
+        """Ensure bucket exists. Create it only if settings.create_bucket is enabled."""
+        s3_client = self._get_s3_client(CreateError)
+
+        try:
+            s3_client.head_bucket(Bucket=bucket)
+            return
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            missing_bucket = status_code == 404 or error_code in ("404", "NoSuchBucket", "NotFound")
+            if not missing_bucket:
+                raise CreateError(
+                    message="Unable to validate S3 bucket.",
+                    details={"bucket": bucket, "error_code": error_code},
+                ) from exc
+
+            if not self.settings.create_bucket:
+                raise CreateError(
+                    message="S3 bucket does not exist. Set settings.create_bucket=True to create it.",
+                    details={"bucket": bucket},
+                ) from exc
+
+            try:
+                s3_client.create_bucket(Bucket=bucket)
+            except ClientError as create_exc:
+                logger.error("Failed to create S3 bucket %s: %s", bucket, create_exc)
+                raise CreateError(
+                    message="Failed to create S3 bucket.",
+                    details={"bucket": bucket},
+                ) from create_exc
+
+    def _ensure_directory_exists(self, bucket: str, key: str) -> None:
+        """Ensure the key prefix exists by creating a directory marker object when needed."""
+        s3_client = self._get_s3_client(CreateError)
+
+        if "/" not in key:
+            return
+
+        directory = key.rsplit("/", 1)[0].strip("/")
+        if not directory:
+            return
+
+        directory_key = f"{directory}/"
+        try:
+            s3_client.put_object(Bucket=bucket, Key=directory_key, Body=b"")
+        except ClientError:
+            # Directory markers are optional in S3; upload can still succeed without them.
+            return
+
+    def read(self) -> None:
+        """Read S3 object(s) into self.output.
+
+        If `settings.path` points to a single object the file is read and deserialized.
+        If it points to a prefix (directory) all files under that prefix are read and
+        concatenated into a single DataFrame.
+
+        Only `ReadError` is raised on failure.
+        """
+        logger.debug(
+            "Starting read operation for %s ;account: %s",
+            self.settings.path,
+            self.linked_service.settings.account_id,
+        )
+        deserializer = self.check_deserializer_exist()
+
+        # Parse path and obtain S3 client/session
+        bucket, key = self._parse_s3_path(self.settings.path)
+        s3_client = self._get_s3_client()
+
+        # Decide whether the key is a single object or a prefix
+        if self._is_object(s3_client, bucket, key):
+            data = self._read_object(s3_client, bucket, key)
+            self.output = deserializer(data)
+        else:
+            # treat as prefix (directory) - ensure prefix ends with '/'
+            self.output = self._read_prefix(s3_client, bucket, key)
+
+    def check_deserializer_exist(self) -> PandasDeserializer:
+        deserializer = self.deserializer
+        if deserializer is None:
+            raise ReadError(
+                "Deserializer is not initialized.",
+                status_code=400,
+                details={"path": getattr(self.settings, "path", None)},
+            )
+        return deserializer
+
+    @staticmethod
+    def _parse_s3_path(path: str, error_cls: DatasetMethodError = ReadError) -> tuple[str, str]:
+        """Parse and validate S3 path values and return (bucket, key).
+
+        Raises the provided dataset method error on invalid input.
+        """
+        if not path:
+            raise error_cls(message="S3 path must be provided in settings")
+
+        # Support s3://bucket/key and bucket/key formats
+        if path.startswith("s3://"):
+            path = path[len("s3://") :]
+
+        if "/" not in path:
+            raise error_cls(message="S3 path must be in the form 'bucket/key' or 's3://bucket/key'")
+
+        bucket, key = path.split("/", 1)
+        if not bucket or not key:
+            raise error_cls(message="S3 path must include both bucket and key")
+        return bucket, key
+
+    def _split_bucket_prefix(self, path: str, error_cls: DatasetMethodError = ReadError) -> tuple[str, str]:
+        """Split a normalized s3 path (no s3://) into (bucket, prefix).
+
+        Reuses _parse_s3_path when a '/' is present; otherwise returns
+        (bucket, "") to represent the whole bucket.
+        """
+        if not path:
+            raise error_cls(message="S3 path must be provided in settings")
+        if "/" in path:
+            return self._parse_s3_path(path, error_cls)
+        return path, ""
+
+    def _get_s3_client(self, error_cls: DatasetMethodError = ReadError) -> S3ClientProtocol:
+        """Return an S3 client from the linked service boto3 session.
+
+        Raises the provided dataset method error if client cannot be acquired.
+        """
+        try:
+            return cast("S3ClientProtocol", self.linked_service.connection.client("s3"))
+        except Exception as exc:
+            logger.error("Unable to acquire S3 client: %s", exc)
+            raise error_cls(message="Unable to acquire S3 client", details={}) from exc
+
+    def _is_object(self, s3_client: S3ClientProtocol, bucket: str, key: str) -> bool:
+        """Return True if the given key exists as an object in S3.
+
+        If head_object reports not found, return False (treat as prefix). Any other
+        unexpected error is propagated as ReadError.
+        """
+        try:
+            s3_client.head_object(Bucket=bucket, Key=key)
+            return True
+        except ClientError as exc:
+            # If object not found, treat as prefix
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if status_code == 404 or error_code in ("404", "NotFound", "NoSuchKey"):
+                return False
+            logger.error("Error during head_object for s3://%s/%s: %s", bucket, key, exc)
+            raise ReadError(message="Failed to check S3 object existence", details={"bucket": bucket, "key": key}) from exc
+
+    def _read_prefix(self, s3_client: S3ClientProtocol, bucket: str, prefix: str) -> pd.DataFrame:
+        """List objects under prefix and read all files, concatenating into a single DataFrame.
+
+        Returns an empty DataFrame if no files found.
+        """
+        deserializer = self.check_deserializer_exist()
+        dfs: list[pd.DataFrame] = []
+        try:
+            paginator = s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix if prefix.endswith("/") else f"{prefix}/"):
+                for obj in page.get("Contents", []) or []:
+                    obj_key = obj.get("Key")
+                    if not obj_key or obj_key.endswith("/"):
+                        continue
+                    data = self._read_object(s3_client, bucket, obj_key)
+                    try:
+                        df = deserializer(data)
+                    except Exception as exc:
+                        logger.error("Failed to deserialize S3 object s3://%s/%s: %s", bucket, obj_key, exc)
+                        raise ReadError(
+                            message="Failed to deserialize S3 object in prefix", details={"bucket": bucket, "key": obj_key}
+                        ) from exc
+                    dfs.append(df)
+        except ClientError as exc:
+            logger.error("Failed to list objects in s3://%s/%s: %s", bucket, prefix, exc)
+            raise ReadError(message="Failed to list objects in S3 prefix", details={"bucket": bucket, "prefix": prefix}) from exc
+
+        if not dfs:
+            return pd.DataFrame()
+
+        try:
+            return pd.concat(dfs, ignore_index=True)
+        except Exception as exc:
+            logger.error("Failed to concat dataframes from prefix s3://%s/%s: %s", bucket, prefix, exc)
+            raise ReadError(
+                message="Failed to concatenate dataframes from S3 prefix", details={"bucket": bucket, "prefix": prefix}
+            ) from exc
+
+    @staticmethod
+    def _read_object(s3_client: S3ClientProtocol, bucket: str, key: str) -> bytes:
+        """Download object bytes from S3. Raises ReadError on failure."""
+        try:
+            response = s3_client.get_object(Bucket=bucket, Key=key)
+            body = cast("S3ObjectBody | None", response.get("Body"))
+            if body is None:
+                raise ReadError(message="S3 object has no body", details={"bucket": bucket, "key": key})
+            payload = body.read()
+            if isinstance(payload, (bytes, bytearray)):
+                return bytes(payload)
+            raise ReadError(
+                message="S3 object body returned unsupported payload type.",
+                details={"bucket": bucket, "key": key, "type": type(payload).__name__},
+            )
+        except ClientError as exc:
+            logger.error("Failed to read s3://%s/%s: %s", bucket, key, exc)
+            raise ReadError(message="Failed to read object from S3", details={"bucket": bucket, "key": key}) from exc
+
+    def write(self) -> NoReturn:
+        raise NotSupportedError
+
+    def delete(self) -> NoReturn:
+        raise NotSupportedError
+
+    def update(self) -> NoReturn:
+        raise NotSupportedError
+
+    def purge(self) -> None:
+        """Remove a single object, a prefix/directory, or an entire bucket.
+
+        Path behavior:
+        - s3://bucket/key -> delete one object when key exists, else treat as prefix
+        - s3://bucket/prefix/ -> delete all objects under prefix
+        - s3://bucket or bucket -> delete all objects in bucket
+        """
+        logger.debug(
+            "Starting purge operation for %s ;account: %s",
+            self.settings.path,
+            self.linked_service.settings.account_id,
+        )
+
+        path = self.settings.path
+        if not path:
+            raise PurgeError(message="S3 path must be provided in settings")
+
+        stripped = path[len("s3://") :] if path.startswith("s3://") else path
+
+        try:
+            s3_client = self._get_s3_client()
+            if "/" not in stripped:
+                bucket = stripped
+                if not self.settings.remove_bucket:
+                    raise PurgeError(
+                        message="Bucket purge is disabled. Set settings.remove_bucket=True to allow it.",
+                        details={"bucket": bucket, "path": path},
+                    )
+
+                keys = self._list_keys_for_prefix(s3_client, bucket, "")
+                self._delete_keys(s3_client, bucket, keys)
+                s3_client.delete_bucket(Bucket=bucket)
+                self.output = pd.DataFrame()
+                return
+            else:
+                bucket, key = self._parse_s3_path(stripped)
+                if self._is_object(s3_client, bucket, key):
+                    keys = [key]
+                else:
+                    prefix = key if key.endswith("/") else f"{key}/"
+                    keys = self._list_keys_for_prefix(s3_client, bucket, prefix)
+
+            self._delete_keys(s3_client, bucket, keys)
+            self.output = pd.DataFrame()
+        except PurgeError:
+            raise
+        except ClientError as exc:
+            logger.error("Failed to purge path %s: %s", path, exc)
+            raise PurgeError(message="Failed to purge S3 path", details={"path": path}) from exc
+        except Exception as exc:
+            logger.error("Unexpected error during purge for %s: %s", path, exc)
+            raise PurgeError(message="Unexpected purge failure", details={"path": path}) from exc
+
+    @staticmethod
+    def _list_keys_for_prefix(s3_client: S3ClientProtocol, bucket: str, prefix: str) -> list[str]:
+        """List all object keys in bucket under prefix."""
+        keys: list[str] = []
+        paginator = s3_client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []) or []:
+                key = obj.get("Key")
+                if key:
+                    keys.append(key)
+        return keys
+
+    @staticmethod
+    def _delete_keys(s3_client: S3ClientProtocol, bucket: str, keys: list[str]) -> None:
+        """Delete keys in S3 using batched delete_objects (1000 max per request)."""
+        if not keys:
+            return
+
+        for i in range(0, len(keys), 1000):
+            batch = keys[i : i + 1000]
+            response = s3_client.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": [{"Key": key} for key in batch], "Quiet": True},
+            )
+            errors = response.get("Errors", []) or []
+            if errors:
+                raise PurgeError(
+                    message=f"Failed to delete one or more S3 objects: {errors}",
+                    details={"bucket": bucket, "errors": errors},
+                )
+
+    def list(self) -> None:
+        """List objects for the configured S3 path and set self.output.
+
+        The resulting DataFrame contains two columns:
+        - metadata: dict with object metadata (name, path, key, bucket, etc.)
+        - content: object bytes
+        """
+        logger.debug(
+            "Listing objects for %s ;account: %s",
+            self.settings.path,
+            self.linked_service.settings.account_id,
+        )
+
+        path = self.settings.path
+        if not path:
+            raise ListError(message="S3 path must be provided in settings")
+
+        # normalize and reuse parsing helpers
+        stripped = path[len("s3://") :] if path.startswith("s3://") else path
+        bucket, prefix = self._split_bucket_prefix(stripped, ListError)
+
+        s3_client = self._get_s3_client(ListError)
+
+        rows: list[dict[str, Any]] = []
+        try:
+            paginator = s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []) or []:
+                    obj_key = obj.get("Key")
+                    if not obj_key or obj_key.endswith("/"):
+                        continue
+
+                    try:
+                        content = self._read_object(s3_client, bucket, obj_key)
+                    except ReadError as exc:
+                        raise ListError(
+                            message="Failed to read object content while listing",
+                            details={"bucket": bucket, "prefix": prefix, "key": obj_key},
+                        ) from exc
+
+                    metadata = {
+                        "name": obj_key.rsplit("/", 1)[-1],
+                        "path": f"s3://{bucket}/{obj_key}",
+                        "bucket": bucket,
+                        "key": obj_key,
+                        "size": obj.get("Size"),
+                        "etag": obj.get("ETag"),
+                        "last_modified": obj.get("LastModified"),
+                        "storage_class": obj.get("StorageClass"),
+                    }
+                    rows.append({"metadata": metadata, "content": content})
+        except ClientError as exc:
+            logger.error("Failed to list objects in s3://%s/%s: %s", bucket, prefix, exc)
+            raise ListError(message="Failed to list objects in S3", details={"bucket": bucket, "prefix": prefix}) from exc
+
+        self.output = pd.DataFrame(rows, columns=["metadata", "content"])
+
+    def rename(self) -> NoReturn:
+        raise NotSupportedError
+
+    def upsert(self) -> NoReturn:
+        raise NotSupportedError
+
+    def close(self) -> None:
+        self.linked_service.close()
