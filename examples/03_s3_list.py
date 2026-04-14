@@ -20,7 +20,7 @@ def main():
         id=UUID("00000000-0000-0000-0000-000000000001"),
         name="test-s3-dataset",
         version="1.0.0",
-        settings=S3DatasetSettings(path="s3://kuba-test-package/*/*.csv"),
+        settings=S3DatasetSettings(bucket="test-package", key="*/*.csv"),
         linked_service=linked_service,
     )
     linked_service.connect()

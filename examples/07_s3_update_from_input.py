@@ -3,6 +3,7 @@ from uuid import UUID
 import pandas as pd
 
 from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings
+from ds_provider_aws_py_lib.dataset.s3 import UpdateSettings
 from ds_provider_aws_py_lib.linked_service import AWSLinkedService, AWSLinkedServiceSettings
 
 
@@ -22,7 +23,11 @@ def main():
         id=UUID("00000000-0000-0000-0000-000000000001"),
         name="test-s3-dataset",
         version="1.0.0",
-        settings=S3DatasetSettings(path="s3://kuba-test-package/test3/test8.csv", update_strategy="merge"),
+        settings=S3DatasetSettings(
+            bucket="test-package",
+            key="test3/test9.csv",
+            update=UpdateSettings(strategy="append"),
+        ),
         linked_service=linked_service,
     )
     linked_service.connect()

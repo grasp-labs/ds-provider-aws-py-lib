@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from fnmatch import fnmatchcase
-from typing import Any, Generic, NoReturn, Protocol, TypeVar, cast
+from typing import Any, Generic, NoReturn, Protocol, TypeAlias, TypeVar, cast
 
 import pandas as pd
 from botocore.exceptions import ClientError
@@ -13,7 +13,14 @@ from ds_resource_plugin_py_lib.common.resource.dataset import (
     DatasetStorageFormatType,
     TabularDataset,
 )
-from ds_resource_plugin_py_lib.common.resource.dataset.errors import CreateError, ListError, PurgeError, ReadError, UpdateError
+from ds_resource_plugin_py_lib.common.resource.dataset.errors import (
+    CreateError,
+    ListError,
+    PurgeError,
+    ReadError,
+    RenameError,
+    UpdateError,
+)
 from ds_resource_plugin_py_lib.common.resource.errors import NotSupportedError
 from ds_resource_plugin_py_lib.common.serde.deserialize import PandasDeserializer
 from ds_resource_plugin_py_lib.common.serde.serialize import PandasSerializer
@@ -23,7 +30,9 @@ from ds_provider_aws_py_lib.linked_service import AWSLinkedService
 
 logger = Logger.get_logger(__name__, package=True)
 
-DatasetMethodError = type[ReadError] | type[ListError] | type[CreateError] | type[PurgeError] | type[UpdateError]
+DatasetMethodError: TypeAlias = (
+    type[ReadError] | type[ListError] | type[CreateError] | type[PurgeError] | type[UpdateError] | type[RenameError]
+)
 
 
 class S3UpdateStrategy(StrEnum):
@@ -51,13 +60,46 @@ class S3Paginator(Protocol):
 
 class S3ClientProtocol(Protocol):
     def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> dict[str, Any]: ...
+
     def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]: ...
+
     def head_bucket(self, *, Bucket: str) -> dict[str, Any]: ...
+
     def create_bucket(self, *, Bucket: str) -> dict[str, Any]: ...
+
     def get_paginator(self, operation_name: str) -> S3Paginator: ...
+
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]: ...
+
     def delete_objects(self, *, Bucket: str, Delete: dict[str, Any]) -> dict[str, Any]: ...
+
     def delete_bucket(self, *, Bucket: str) -> dict[str, Any]: ...
+
+    def copy_object(self, *, Bucket: str, Key: str, CopySource: dict[str, str]) -> dict[str, Any]: ...
+
+    def delete_object(self, *, Bucket: str, Key: str) -> dict[str, Any]: ...
+
+
+@dataclass(kw_only=True)
+class CreateSettings:
+    create_bucket: bool = False
+    content: io.BytesIO | None = None
+
+
+@dataclass(kw_only=True)
+class UpdateSettings:
+    content: io.BytesIO | None = None
+    strategy: str = "overwrite"
+
+
+@dataclass(kw_only=True)
+class RenameSettings:
+    new_file_path: str | None = None
+
+
+@dataclass(kw_only=True)
+class PurgeSettings:
+    remove_bucket: bool = False
 
 
 @dataclass(kw_only=True)
@@ -65,27 +107,21 @@ class S3DatasetSettings(DatasetSettings):
     """Settings for S3 dataset operations.
 
     Attributes:
-        path: S3 path in the form ``s3://bucket/key`` or ``bucket/key``.
-              Supports glob wildcards (``*``, ``?``, ``[...]``) for read and list.
-        remove_bucket: Allow purge() to delete the entire bucket. Default ``False``.
-        create_bucket: Allow create() to create the bucket when it does not exist.
-            Default ``False``.
-        content: Raw bytes payload (``io.BytesIO``) used instead of serializing
-            ``self.input``. Mutually exclusive with a non-empty input DataFrame.
-        update_strategy: Strategy used by update(). Default ``S3UpdateStrategy.OVERWRITE``.
-
-            - ``OVERWRITE`` — replace the whole object with the new payload.
-              The object must already exist.
-            - ``APPEND`` — download the existing object, concatenate rows from
-              ``self.input``, and re-upload. Requires both serializer and
-              deserializer to be set.
+        bucket: S3 bucket name.
+        key: S3 object key or prefix within ``bucket``.
+            Supports glob wildcards (``*``, ``?``, ``[...]``) for read and list.
+        create: Settings used by create().
+        update: Settings used by update().
+        rename: Settings used by rename().
+        purge: Settings used by purge().
     """
 
-    path: str
-    remove_bucket: bool = False
-    create_bucket: bool = False
-    content: io.BytesIO | None = None
-    update_strategy: S3UpdateStrategy = S3UpdateStrategy.OVERWRITE
+    bucket: str | None = None
+    key: str | None = None
+    create: CreateSettings = field(default_factory=CreateSettings)
+    update: UpdateSettings = field(default_factory=UpdateSettings)
+    rename: RenameSettings = field(default_factory=RenameSettings)
+    purge: PurgeSettings = field(default_factory=PurgeSettings)
 
 
 S3DatasetSettingsType = TypeVar(
@@ -127,7 +163,7 @@ class S3Dataset(
         """Create/write the current input DataFrame to the configured S3 object."""
         logger.debug(
             "Starting create operation for %s ;account: %s",
-            self.settings.path,
+            self._current_s3_uri(),
             self.linked_service.settings.account_id,
         )
 
@@ -135,7 +171,7 @@ class S3Dataset(
             self.output = self._build_create_output()
             return
 
-        bucket, key = self._parse_s3_path(self.settings.path, CreateError)
+        bucket, key = self._resolve_bucket_key(CreateError)
 
         self._validate_create_sources(bucket, key)
         self._ensure_bucket_exists(bucket)
@@ -143,13 +179,13 @@ class S3Dataset(
         self._ensure_object_does_not_exist(bucket, key)
 
         body = self._build_create_body(bucket, key)
-        self._upload_create_body(bucket, key, body)
-        self.output = self._build_create_output()
+        response = self._upload_create_body(bucket, key, body)
+        self.output = self._build_response_output(response)
 
     def _should_skip_create(self) -> bool:
         """Return True when create() has nothing to do under the contract."""
         input_df = self._get_input_dataframe()
-        return self.settings.content is None and (input_df is None or input_df.empty)
+        return self._get_create_content() is None and (input_df is None or input_df.empty)
 
     def _get_input_dataframe(self) -> pd.DataFrame | None:
         """Return input narrowed to DataFrame | None for create-flow checks."""
@@ -166,28 +202,29 @@ class S3Dataset(
         """Validate mutually exclusive create sources: content vs input."""
         input_df = self._get_input_dataframe()
         has_input_payload = input_df is not None and not input_df.empty
-        if self.settings.content is not None and has_input_payload:
+        if self._get_create_content() is not None and has_input_payload:
             raise CreateError(
-                message="Both settings.content and input are provided. Provide only one source.",
+                message="Both settings.create.content and input are provided. Provide only one source.",
                 details={"bucket": bucket, "key": key},
             )
 
     def _build_create_body(self, bucket: str, key: str) -> bytes:
-        """Build upload body from settings.content or serialized input."""
-        if self.settings.content is not None:
-            return self.settings.content.getvalue()
+        """Build upload body from settings.create.content or serialized input."""
+        create_content = self._get_create_content()
+        if create_content is not None:
+            return create_content.getvalue()
 
         if self.serializer is None:
             raise CreateError(
                 message="Serializer is not initialized.",
                 status_code=400,
-                details={"path": getattr(self.settings, "path", None)},
+                details={"path": self._current_s3_uri()},
             )
 
         input_df = self._get_input_dataframe()
         if input_df is None:
             raise CreateError(
-                message="Input is None. Provide input DataFrame or settings.content.",
+                message="Input is None. Provide input DataFrame or settings.create.content.",
                 status_code=400,
                 details={"bucket": bucket, "key": key},
             )
@@ -210,11 +247,11 @@ class S3Dataset(
             details={"type": type(serialized).__name__, "bucket": bucket, "key": key},
         )
 
-    def _upload_create_body(self, bucket: str, key: str, body: bytes) -> None:
-        """Upload bytes to S3."""
+    def _upload_create_body(self, bucket: str, key: str, body: bytes) -> dict[str, Any]:
+        """Upload bytes to S3 and return the backend response payload."""
         s3_client = self._get_s3_client(CreateError)
         try:
-            s3_client.put_object(Bucket=bucket, Key=key, Body=body)
+            return s3_client.put_object(Bucket=bucket, Key=key, Body=body)
         except ClientError as exc:
             logger.error("Failed to upload object s3://%s/%s: %s", bucket, key, exc)
             raise CreateError(
@@ -259,7 +296,7 @@ class S3Dataset(
                     details={"bucket": bucket, "error_code": error_code},
                 ) from exc
 
-            if not self.settings.create_bucket:
+            if not self.settings.create.create_bucket:
                 raise CreateError(
                     message="S3 bucket does not exist. Set settings.create_bucket=True to create it.",
                     details={"bucket": bucket},
@@ -295,21 +332,21 @@ class S3Dataset(
     def read(self) -> None:
         """Read S3 object(s) into self.output.
 
-        If `settings.path` points to a single object the file is read and deserialized.
-        If it points to a prefix (directory) all files under that prefix are read and
-        concatenated into a single DataFrame.
+        If ``settings.key`` points to a single object the file is read and
+        deserialized. If it points to a prefix (directory) all files under that
+        prefix are read and concatenated into a single DataFrame.
 
         Only `ReadError` is raised on failure.
         """
         logger.debug(
             "Starting read operation for %s ;account: %s",
-            self.settings.path,
+            self._current_s3_uri(),
             self.linked_service.settings.account_id,
         )
         deserializer = self.check_deserializer_exist()
 
-        # Parse path and obtain S3 client/session
-        bucket, key = self._parse_s3_path(self.settings.path)
+        # Resolve the configured S3 location and obtain the S3 client/session.
+        bucket, key = self._resolve_bucket_key(ReadError)
         s3_client = self._get_s3_client()
 
         if self._contains_wildcard(key):
@@ -400,77 +437,67 @@ class S3Dataset(
             raise ReadError(
                 "Deserializer is not initialized.",
                 status_code=400,
-                details={"path": getattr(self.settings, "path", None)},
+                details={"path": self._current_s3_uri()},
             )
         return deserializer
 
-    @staticmethod
-    def _parse_s3_path(path: str, error_cls: DatasetMethodError = ReadError) -> tuple[str, str]:
-        """Parse and validate S3 path values and return (bucket, key).
+    def _resolve_bucket_key(
+        self,
+        error_cls: DatasetMethodError = ReadError,
+        *,
+        allow_bucket_only: bool = False,
+    ) -> tuple[str, str]:
+        """Resolve bucket/key from explicit settings fields."""
+        bucket = self.settings.bucket
+        if not bucket:
+            raise error_cls(message="S3 bucket must be provided in settings")
 
-        Raises the provided dataset method error on invalid input.
-        """
-        if not path:
-            raise error_cls(message="S3 path must be provided in settings")
+        key = self.settings.key or ""
+        if not allow_bucket_only and not key:
+            raise error_cls(message="S3 key must be provided in settings")
 
-        # Support s3://bucket/key and bucket/key formats
-        if path.startswith("s3://"):
-            path = path[len("s3://") :]
-
-        if "/" not in path:
-            raise error_cls(message="S3 path must be in the form 'bucket/key' or 's3://bucket/key'")
-
-        bucket, key = path.split("/", 1)
-        if not bucket or not key:
-            raise error_cls(message="S3 path must include both bucket and key")
         return bucket, key
 
-    def _split_bucket_prefix(self, path: str, error_cls: DatasetMethodError = ReadError) -> tuple[str, str]:
-        """Split a normalized s3 path (no s3://) into (bucket, prefix).
+    def _current_s3_uri(self, *, allow_bucket_only: bool = False) -> str | None:
+        """Return the configured S3 URI when enough settings are present."""
+        bucket = self.settings.bucket
+        if not bucket:
+            return None
 
-        Reuses _parse_s3_path when a '/' is present; otherwise returns
-        (bucket, "") to represent the whole bucket.
-        """
-        if not path:
-            raise error_cls(message="S3 path must be provided in settings")
-        if "/" in path:
-            return self._parse_s3_path(path, error_cls)
-        return path, ""
+        key = self.settings.key or ""
+        if not key and not allow_bucket_only:
+            return None
+        if not key:
+            return f"s3://{bucket}"
+        return f"s3://{bucket}/{key}"
 
     def _get_s3_client(self, error_cls: DatasetMethodError = ReadError) -> S3ClientProtocol:
-        """Return an S3 client from the linked service boto3 session.
-
-        Raises the provided dataset method error if client cannot be acquired.
-        """
+        """Return an S3 client from the linked service boto3 session."""
         try:
-            return cast("S3ClientProtocol", self.linked_service.connection.client("s3"))
+            connection = cast("Any", self.linked_service.connection)
+            return cast("S3ClientProtocol", connection.client("s3"))
         except Exception as exc:
             logger.error("Unable to acquire S3 client: %s", exc)
             raise error_cls(message="Unable to acquire S3 client", details={}) from exc
 
     def _is_object(self, s3_client: S3ClientProtocol, bucket: str, key: str) -> bool:
-        """Return True if the given key exists as an object in S3.
-
-        If head_object reports not found, return False (treat as prefix). Any other
-        unexpected error is propagated as ReadError.
-        """
+        """Return True when the given key exists as an S3 object."""
         try:
             s3_client.head_object(Bucket=bucket, Key=key)
             return True
         except ClientError as exc:
-            # If object not found, treat as prefix
             error_code = exc.response.get("Error", {}).get("Code", "")
             status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if status_code == 404 or error_code in ("404", "NotFound", "NoSuchKey"):
                 return False
             logger.error("Error during head_object for s3://%s/%s: %s", bucket, key, exc)
-            raise ReadError(message="Failed to check S3 object existence", details={"bucket": bucket, "key": key}) from exc
+            raise ReadError(
+                message="Failed to check S3 object existence",
+                details={"bucket": bucket, "key": key},
+            ) from exc
 
     def _read_prefix(self, s3_client: S3ClientProtocol, bucket: str, prefix: str) -> pd.DataFrame:
-        """List objects under prefix and read all files, concatenating into a single DataFrame.
-
-        Raises ReadError when no files are found.
-        """
+        """Read all files under a prefix and concatenate them into one DataFrame."""
         deserializer = self.check_deserializer_exist()
         dfs: list[pd.DataFrame] = []
         try:
@@ -486,12 +513,16 @@ class S3Dataset(
                     except Exception as exc:
                         logger.error("Failed to deserialize S3 object s3://%s/%s: %s", bucket, obj_key, exc)
                         raise ReadError(
-                            message="Failed to deserialize S3 object in prefix", details={"bucket": bucket, "key": obj_key}
+                            message="Failed to deserialize S3 object in prefix",
+                            details={"bucket": bucket, "key": obj_key},
                         ) from exc
                     dfs.append(df)
         except ClientError as exc:
             logger.error("Failed to list objects in s3://%s/%s: %s", bucket, prefix, exc)
-            raise ReadError(message="Failed to list objects in S3 prefix", details={"bucket": bucket, "prefix": prefix}) from exc
+            raise ReadError(
+                message="Failed to list objects in S3 prefix",
+                details={"bucket": bucket, "prefix": prefix},
+            ) from exc
 
         if not dfs:
             raise ReadError(
@@ -504,12 +535,13 @@ class S3Dataset(
         except Exception as exc:
             logger.error("Failed to concat dataframes from prefix s3://%s/%s: %s", bucket, prefix, exc)
             raise ReadError(
-                message="Failed to concatenate dataframes from S3 prefix", details={"bucket": bucket, "prefix": prefix}
+                message="Failed to concatenate dataframes from S3 prefix",
+                details={"bucket": bucket, "prefix": prefix},
             ) from exc
 
     @staticmethod
     def _read_object(s3_client: S3ClientProtocol, bucket: str, key: str) -> bytes:
-        """Download object bytes from S3. Raises ReadError on failure."""
+        """Download object bytes from S3."""
         try:
             response = s3_client.get_object(Bucket=bucket, Key=key)
             body = cast("S3ObjectBody | None", response.get("Body"))
@@ -526,16 +558,13 @@ class S3Dataset(
             logger.error("Failed to read s3://%s/%s: %s", bucket, key, exc)
             raise ReadError(message="Failed to read object from S3", details={"bucket": bucket, "key": key}) from exc
 
-    def write(self) -> NoReturn:
-        raise NotSupportedError
-
     def delete(self) -> NoReturn:
         raise NotSupportedError
 
     def update(self) -> None:
         """Update an existing S3 object.
 
-        Behaviour is controlled by ``settings.update_strategy``:
+        Behaviour is controlled by ``settings.update.strategy``:
 
         - ``OVERWRITE`` (default): replace the entire object with the new payload.
           The target object must already exist.
@@ -543,28 +572,28 @@ class S3Dataset(
           new input rows, re-serialize and upload. Both serializer and deserializer
           must be configured.
 
-        Accepts either ``self.input`` (DataFrame) or ``settings.content`` (BytesIO),
-        never both. ``settings.content`` is supported only for ``OVERWRITE``.
+        Accepts either ``self.input`` (DataFrame) or ``settings.update.content`` (BytesIO),
+        never both. ``settings.update.content`` is supported only for ``OVERWRITE``.
         On success, ``self.output`` contains a one-row DataFrame built from the
         S3 ``put_object`` response payload. When both are empty/None the method
         returns without error (no-op).
         """
         logger.debug(
             "Starting update operation for %s ;account: %s (strategy: %s)",
-            self.settings.path,
+            self._current_s3_uri(),
             self.linked_service.settings.account_id,
-            self.settings.update_strategy,
+            self._get_update_strategy(),
         )
 
         if self._should_skip_update():
             self.output = self._build_update_output()
             return
 
-        bucket, key = self._parse_s3_path(self.settings.path, UpdateError)
+        bucket, key = self._resolve_bucket_key(UpdateError)
         self._validate_update_sources(bucket, key)
         self._ensure_object_exists(bucket, key)
 
-        strategy = self.settings.update_strategy
+        strategy = self._get_update_strategy()
         if strategy == S3UpdateStrategy.OVERWRITE:
             body = self._build_update_body(bucket, key)
             response = self._upload_update_body(bucket, key, body)
@@ -582,7 +611,7 @@ class S3Dataset(
     def _should_skip_update(self) -> bool:
         """Return True when update() has nothing to do under the contract."""
         input_df = self._get_input_dataframe()
-        return self.settings.content is None and (input_df is None or input_df.empty)
+        return self._get_update_content() is None and (input_df is None or input_df.empty)
 
     def _build_update_output(self) -> pd.DataFrame:
         """Return contract-aligned update output without mutating self.input."""
@@ -600,15 +629,18 @@ class S3Dataset(
         """Validate mutually exclusive update sources: content vs input."""
         input_df = self._get_input_dataframe()
         has_input_payload = input_df is not None and not input_df.empty
-        if self.settings.content is not None and has_input_payload:
+        update_content = self._get_update_content()
+        update_strategy = self._get_update_strategy()
+
+        if update_content is not None and has_input_payload:
             raise UpdateError(
-                message="Both settings.content and input are provided. Provide only one source.",
+                message="Both settings.update.content and input are provided. Provide only one source.",
                 details={"bucket": bucket, "key": key},
             )
-        if self.settings.content is not None and self.settings.update_strategy != S3UpdateStrategy.OVERWRITE:
+        if update_content is not None and update_strategy != S3UpdateStrategy.OVERWRITE:
             raise UpdateError(
-                message="settings.content is supported only for OVERWRITE update strategy.",
-                details={"bucket": bucket, "key": key, "strategy": str(self.settings.update_strategy)},
+                message="settings.update.content is supported only for OVERWRITE update strategy.",
+                details={"bucket": bucket, "key": key, "strategy": str(update_strategy)},
             )
 
     def _ensure_object_exists(self, bucket: str, key: str) -> None:
@@ -632,21 +664,22 @@ class S3Dataset(
             ) from exc
 
     def _build_update_body(self, bucket: str, key: str) -> bytes:
-        """Build upload body from settings.content or serialized input (OVERWRITE strategy)."""
-        if self.settings.content is not None:
-            return self.settings.content.getvalue()
+        """Build upload body from settings.update.content or serialized input (OVERWRITE strategy)."""
+        update_content = self._get_update_content()
+        if update_content is not None:
+            return update_content.getvalue()
 
         if self.serializer is None:
             raise UpdateError(
                 message="Serializer is not initialized.",
                 status_code=400,
-                details={"path": getattr(self.settings, "path", None)},
+                details={"path": self._current_s3_uri()},
             )
 
         input_df = self._get_input_dataframe()
         if input_df is None:
             raise UpdateError(
-                message="Input is None. Provide input DataFrame or settings.content.",
+                message="Input is None. Provide input DataFrame or settings.update.content.",
                 status_code=400,
                 details={"bucket": bucket, "key": key},
             )
@@ -681,13 +714,13 @@ class S3Dataset(
             raise UpdateError(
                 message="Serializer is not initialized. APPEND strategy requires a serializer.",
                 status_code=400,
-                details={"path": getattr(self.settings, "path", None)},
+                details={"path": self._current_s3_uri()},
             )
         if self.deserializer is None:
             raise UpdateError(
                 message="Deserializer is not initialized. APPEND strategy requires a deserializer.",
                 status_code=400,
-                details={"path": getattr(self.settings, "path", None)},
+                details={"path": self._current_s3_uri()},
             )
 
         s3_client = self._get_s3_client(UpdateError)
@@ -767,46 +800,60 @@ class S3Dataset(
         """
         logger.debug(
             "Starting purge operation for %s ;account: %s",
-            self.settings.path,
+            self._current_s3_uri(allow_bucket_only=True),
             self.linked_service.settings.account_id,
         )
 
-        path = self.settings.path
-        if not path:
-            raise PurgeError(message="S3 path must be provided in settings")
-
-        stripped = path[len("s3://") :] if path.startswith("s3://") else path
+        path = self._current_s3_uri(allow_bucket_only=True)
+        bucket, key = self._resolve_bucket_key(PurgeError, allow_bucket_only=True)
 
         try:
             s3_client = self._get_s3_client()
-            if "/" not in stripped:
-                bucket = stripped
-                if not self.settings.remove_bucket:
+            delete_responses: list[dict[str, Any]] = []
+            delete_bucket_response: dict[str, Any] | None = None
+            if not key:
+                if not self.settings.purge.remove_bucket:
                     raise PurgeError(
                         message="Bucket purge is disabled. Set settings.remove_bucket=True to allow it.",
                         details={"bucket": bucket, "path": path},
                     )
 
                 keys = self._list_keys_for_prefix(s3_client, bucket, "")
-                self._delete_keys(s3_client, bucket, keys)
+                delete_responses = self._delete_keys(s3_client, bucket, keys)
                 try:
-                    s3_client.delete_bucket(Bucket=bucket)
+                    delete_bucket_response = s3_client.delete_bucket(Bucket=bucket)
                 except ClientError as exc:
                     error_code = exc.response.get("Error", {}).get("Code", "")
                     if error_code not in ("NoSuchBucket", "404"):
                         raise
-                self.output = pd.DataFrame()
+                self.output = self._build_response_output(
+                    {
+                        "path": path,
+                        "bucket": bucket,
+                        "purge_scope": "bucket",
+                        "delete_responses": delete_responses,
+                        "delete_bucket_response": delete_bucket_response,
+                    }
+                )
                 return
+            elif self._is_object(s3_client, bucket, key):
+                keys = [key]
+                purge_scope = "object"
             else:
-                bucket, key = self._parse_s3_path(stripped)
-                if self._is_object(s3_client, bucket, key):
-                    keys = [key]
-                else:
-                    prefix = key if key.endswith("/") else f"{key}/"
-                    keys = self._list_keys_for_prefix(s3_client, bucket, prefix)
+                prefix = key if key.endswith("/") else f"{key}/"
+                keys = self._list_keys_for_prefix(s3_client, bucket, prefix)
+                purge_scope = "prefix"
 
-            self._delete_keys(s3_client, bucket, keys)
-            self.output = pd.DataFrame()
+            delete_responses = self._delete_keys(s3_client, bucket, keys)
+            self.output = self._build_response_output(
+                {
+                    "path": path,
+                    "bucket": bucket,
+                    "purge_scope": purge_scope,
+                    "deleted_keys": keys,
+                    "delete_responses": delete_responses,
+                }
+            )
         except PurgeError:
             raise
         except ClientError as exc:
@@ -839,10 +886,12 @@ class S3Dataset(
         return keys
 
     @staticmethod
-    def _delete_keys(s3_client: S3ClientProtocol, bucket: str, keys: list[str]) -> None:
+    def _delete_keys(s3_client: S3ClientProtocol, bucket: str, keys: list[str]) -> list[dict[str, Any]]:
         """Delete keys in S3 using batched delete_objects (1000 max per request)."""
         if not keys:
-            return
+            return []
+
+        responses: list[dict[str, Any]] = []
 
         for i in range(0, len(keys), 1000):
             batch = keys[i : i + 1000]
@@ -850,6 +899,7 @@ class S3Dataset(
                 Bucket=bucket,
                 Delete={"Objects": [{"Key": key} for key in batch], "Quiet": True},
             )
+            responses.append(response)
             errors = response.get("Errors", []) or []
             if errors:
                 raise PurgeError(
@@ -857,8 +907,10 @@ class S3Dataset(
                     details={"bucket": bucket, "errors": errors},
                 )
 
+        return responses
+
     def list(self) -> None:
-        """List objects for the configured S3 path and set self.output.
+        """List objects for the configured S3 location and set self.output.
 
         The resulting DataFrame contains two columns:
         - metadata: dict with object metadata (name, path, key, bucket, etc.)
@@ -866,17 +918,11 @@ class S3Dataset(
         """
         logger.debug(
             "Listing objects for %s ;account: %s",
-            self.settings.path,
+            self._current_s3_uri(allow_bucket_only=True),
             self.linked_service.settings.account_id,
         )
 
-        path = self.settings.path
-        if not path:
-            raise ListError(message="S3 path must be provided in settings")
-
-        # normalize and reuse parsing helpers
-        stripped = path[len("s3://") :] if path.startswith("s3://") else path
-        bucket, prefix = self._split_bucket_prefix(stripped, ListError)
+        bucket, prefix = self._resolve_bucket_key(ListError, allow_bucket_only=True)
 
         s3_client = self._get_s3_client(ListError)
 
@@ -913,15 +959,136 @@ class S3Dataset(
                     rows.append({"metadata": metadata, "content": content})
         except ClientError as exc:
             logger.error("Failed to list objects in s3://%s/%s: %s", bucket, prefix, exc)
-            raise ListError(message="Failed to list objects in S3", details={"bucket": bucket, "prefix": prefix}) from exc
+            raise ListError(
+                message="Failed to list objects in S3",
+                details={"bucket": bucket, "prefix": prefix},
+            ) from exc
 
         self.output = pd.DataFrame(rows, columns=["metadata", "content"])
 
-    def rename(self) -> NoReturn:
-        raise NotSupportedError
+    def rename(self) -> None:
+        """Rename an S3 object from ``settings.key`` to ``settings.rename.new_file_path``.
+
+        This operation is implemented as S3 copy-then-delete in the same bucket.
+        On success, ``self.output`` is a one-row DataFrame with backend response payload.
+        """
+        logger.debug(
+            "Renaming S3 object from %s to %s ;account: %s",
+            self._current_s3_uri(),
+            self._rename_target_uri(),
+            self.linked_service.settings.account_id,
+        )
+
+        source_bucket, source_key = self._resolve_bucket_key(RenameError)
+        target_key = self._resolve_rename_target_key()
+
+        if self._contains_wildcard(source_key) or self._contains_wildcard(target_key):
+            raise RenameError(message="rename() does not support wildcard paths.")
+        if source_key == target_key:
+            raise RenameError(message="Source and destination paths must be different for rename().")
+
+        s3_client = self._get_s3_client(RenameError)
+        self._ensure_object_exists_for_rename(s3_client, source_bucket, source_key)
+        self._ensure_object_absent_for_rename(s3_client, source_bucket, target_key)
+
+        try:
+            copy_response = s3_client.copy_object(
+                Bucket=source_bucket,
+                Key=target_key,
+                CopySource={"Bucket": source_bucket, "Key": source_key},
+            )
+            delete_response = s3_client.delete_object(Bucket=source_bucket, Key=source_key)
+            self.output = self._build_response_output(
+                {
+                    "copy_response": copy_response,
+                    "delete_response": delete_response,
+                    "source": f"s3://{source_bucket}/{source_key}",
+                    "target": f"s3://{source_bucket}/{target_key}",
+                }
+            )
+        except ClientError as exc:
+            logger.error(
+                "Failed to rename object s3://%s/%s to s3://%s/%s: %s",
+                source_bucket,
+                source_key,
+                source_bucket,
+                target_key,
+                exc,
+            )
+            raise RenameError(
+                message="Failed to rename S3 object.",
+                details={
+                    "source": f"s3://{source_bucket}/{source_key}",
+                    "target": f"s3://{source_bucket}/{target_key}",
+                },
+            ) from exc
+
+    def _resolve_rename_target_key(self) -> str:
+        new_file_path = self._get_rename_new_file_path()
+        if new_file_path:
+            return new_file_path
+
+        raise RenameError(message="settings.rename.new_file_path must be provided for rename().")
+
+    def _rename_target_uri(self) -> str | None:
+        bucket = self.settings.bucket
+        key = self._get_rename_new_file_path()
+        if not bucket or not key:
+            return None
+        return f"s3://{bucket}/{key}"
+
+    @staticmethod
+    def _ensure_object_exists_for_rename(s3_client: S3ClientProtocol, bucket: str, key: str) -> None:
+        try:
+            s3_client.head_object(Bucket=bucket, Key=key)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            not_found = status_code == 404 or error_code in ("404", "NotFound", "NoSuchKey")
+            if not_found:
+                raise RenameError(
+                    message="Source object does not exist for rename().",
+                    status_code=404,
+                    details={"bucket": bucket, "key": key},
+                ) from exc
+            raise RenameError(
+                message="Unable to validate source object for rename().",
+                details={"bucket": bucket, "key": key, "error_code": error_code},
+            ) from exc
+
+    @staticmethod
+    def _ensure_object_absent_for_rename(s3_client: S3ClientProtocol, bucket: str, key: str) -> None:
+        try:
+            s3_client.head_object(Bucket=bucket, Key=key)
+            raise RenameError(
+                message="Destination object already exists for rename().",
+                status_code=409,
+                details={"bucket": bucket, "key": key},
+            )
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            not_found = status_code == 404 or error_code in ("404", "NotFound", "NoSuchKey")
+            if not not_found:
+                raise RenameError(
+                    message="Unable to validate destination object for rename().",
+                    details={"bucket": bucket, "key": key, "error_code": error_code},
+                ) from exc
 
     def upsert(self) -> NoReturn:
         raise NotSupportedError
 
     def close(self) -> None:
         self.linked_service.close()
+
+    def _get_create_content(self) -> io.BytesIO | None:
+        return self.settings.create.content
+
+    def _get_update_content(self) -> io.BytesIO | None:
+        return self.settings.update.content
+
+    def _get_update_strategy(self) -> S3UpdateStrategy:
+        return cast("S3UpdateStrategy", self.settings.update.strategy)
+
+    def _get_rename_new_file_path(self) -> str | None:
+        return self.settings.rename.new_file_path

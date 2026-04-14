@@ -1,22 +1,10 @@
-import io
 from uuid import UUID
-
-import pandas as pd
-
 from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings
-from ds_provider_aws_py_lib.dataset.s3 import CreateSettings
+from ds_provider_aws_py_lib.dataset.s3 import RenameSettings
 from ds_provider_aws_py_lib.linked_service import AWSLinkedService, AWSLinkedServiceSettings
 
 
 def main():
-    df = pd.DataFrame(
-        {
-            "id": [1, 2, 3],
-            "name": ["Alice", "Bob", "Charlie"],
-            "age": [25, 30, 35],
-        }
-    )
-    dataframe_as_binary: io.BytesIO = io.BytesIO(df.to_csv(index=False).encode("utf-8"))
     linked_service = AWSLinkedService(
         id=UUID("00000000-0000-0000-0000-000000000000"),
         name="test-name",
@@ -34,14 +22,14 @@ def main():
         version="1.0.0",
         settings=S3DatasetSettings(
             bucket="test-package",
-            key="test/testbca8.csv",
-            create=CreateSettings(content=dataframe_as_binary),
+            key="test3/test01.csv",
+            rename=RenameSettings(new_file_path="test3/test25.csv"),
         ),
         linked_service=linked_service,
     )
     linked_service.connect()
 
-    dataset.create()
+    dataset.rename()
     print(dataset.output)
 
 

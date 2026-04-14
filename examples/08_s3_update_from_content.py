@@ -3,7 +3,8 @@ from uuid import UUID
 
 import pandas as pd
 
-from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings, S3UpdateStrategy
+from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings
+from ds_provider_aws_py_lib.dataset.s3 import UpdateSettings
 from ds_provider_aws_py_lib.linked_service import AWSLinkedService, AWSLinkedServiceSettings
 
 
@@ -32,9 +33,9 @@ def main():
         name="test-s3-dataset",
         version="1.0.0",
         settings=S3DatasetSettings(
-            path="s3://kuba-test-package/test3/test10.csv",
-            content=dataframe_as_binary,
-            update_strategy=S3UpdateStrategy.OVERWRITE,
+            bucket="test-package",
+            key="test3/test9.csv",
+            update=UpdateSettings(content=dataframe_as_binary, strategy="overwrite"),
         ),
         linked_service=linked_service,
     )

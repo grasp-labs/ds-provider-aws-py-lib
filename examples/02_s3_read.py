@@ -13,14 +13,17 @@ def main():
             account_id="...",
             access_key_id="...",
             access_key_secret="...",
-            region="us-west-2",
+            region="us-east-1",
         ),
     )
     dataset = S3Dataset(
         id=UUID("00000000-0000-0000-0000-000000000001"),
         name="test-s3-dataset",
         version="1.0.0",
-        settings=S3DatasetSettings(path="s3://daas-service-sandbox/reports/integrity_checking/*.csv"),
+        settings=S3DatasetSettings(
+            bucket="test-package",
+            key="test3/*.csv",
+        ),
         linked_service=linked_service,
     )
     linked_service.connect()

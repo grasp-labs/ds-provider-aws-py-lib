@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings
+from ds_provider_aws_py_lib.dataset.s3 import PurgeSettings
 from ds_provider_aws_py_lib.linked_service import AWSLinkedService, AWSLinkedServiceSettings
 
 
@@ -20,7 +21,7 @@ def main():
         id=UUID("00000000-0000-0000-0000-000000000001"),
         name="test-s3-dataset",
         version="1.0.0",
-        settings=S3DatasetSettings(path="s3://kuba-test-package123", remove_bucket=True),
+        settings=S3DatasetSettings(key="", bucket="test-package2", purge=PurgeSettings(remove_bucket=True)),
         linked_service=linked_service,
     )
     linked_service.connect()
