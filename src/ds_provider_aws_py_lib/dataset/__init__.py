@@ -10,9 +10,10 @@ Example:
     ... # todo
 """
 
-from .s3 import S3Dataset, S3DatasetSettings
+from .s3 import S3Dataset, S3DatasetSettings, S3UpdateStrategy
 
 __all__ = [
     "S3Dataset",
     "S3DatasetSettings",
+    "S3UpdateStrategy",
 ]

@@ -32,9 +32,9 @@ def main() -> None:
         name="test-name",
         version="1.0.0",
         settings=AWSLinkedServiceSettings(
-            account_id="your_account_id",
-            access_key_id="your_access_key_id",
-            access_key_secret="your_access_key_secret",
+            account_id="...",
+            access_key_id="...",
+            access_key_secret="...",
             region="us-west-2",
         ),
     )

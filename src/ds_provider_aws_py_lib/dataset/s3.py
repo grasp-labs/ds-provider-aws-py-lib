@@ -1,6 +1,8 @@
 import io
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from enum import StrEnum
+from fnmatch import fnmatchcase
 from typing import Any, Generic, NoReturn, Protocol, TypeVar, cast
 
 import pandas as pd
@@ -11,7 +13,7 @@ from ds_resource_plugin_py_lib.common.resource.dataset import (
     DatasetStorageFormatType,
     TabularDataset,
 )
-from ds_resource_plugin_py_lib.common.resource.dataset.errors import CreateError, ListError, PurgeError, ReadError
+from ds_resource_plugin_py_lib.common.resource.dataset.errors import CreateError, ListError, PurgeError, ReadError, UpdateError
 from ds_resource_plugin_py_lib.common.resource.errors import NotSupportedError
 from ds_resource_plugin_py_lib.common.serde.deserialize import PandasDeserializer
 from ds_resource_plugin_py_lib.common.serde.serialize import PandasSerializer
@@ -21,7 +23,22 @@ from ds_provider_aws_py_lib.linked_service import AWSLinkedService
 
 logger = Logger.get_logger(__name__, package=True)
 
-DatasetMethodError = type[ReadError] | type[ListError] | type[CreateError] | type[PurgeError]
+DatasetMethodError = type[ReadError] | type[ListError] | type[CreateError] | type[PurgeError] | type[UpdateError]
+
+
+class S3UpdateStrategy(StrEnum):
+    """Strategy that controls how update() modifies an existing S3 object.
+
+    Attributes:
+        OVERWRITE: Replace the entire object with the new payload.
+                   The target object must already exist.
+        APPEND:    Download the existing object, deserialize it, concatenate
+                   new rows from ``self.input``, re-serialize and upload.
+                   Requires both serializer and deserializer to be configured.
+    """
+
+    OVERWRITE = "overwrite"
+    APPEND = "append"
 
 
 class S3ObjectBody(Protocol):
@@ -45,17 +62,30 @@ class S3ClientProtocol(Protocol):
 
 @dataclass(kw_only=True)
 class S3DatasetSettings(DatasetSettings):
-    """
-    Settings for PostgreSQL dataset operations.
+    """Settings for S3 dataset operations.
 
-    The `read` settings contains read-specific configuration that only
-    applies to the read() operation, not to create(), delete(), update(), etc.
+    Attributes:
+        path: S3 path in the form ``s3://bucket/key`` or ``bucket/key``.
+              Supports glob wildcards (``*``, ``?``, ``[...]``) for read and list.
+        remove_bucket: Allow purge() to delete the entire bucket. Default ``False``.
+        create_bucket: Allow create() to create the bucket when it does not exist.
+            Default ``False``.
+        content: Raw bytes payload (``io.BytesIO``) used instead of serializing
+            ``self.input``. Mutually exclusive with a non-empty input DataFrame.
+        update_strategy: Strategy used by update(). Default ``S3UpdateStrategy.OVERWRITE``.
+
+            - ``OVERWRITE`` — replace the whole object with the new payload.
+              The object must already exist.
+            - ``APPEND`` — download the existing object, concatenate rows from
+              ``self.input``, and re-upload. Requires both serializer and
+              deserializer to be set.
     """
 
     path: str
     remove_bucket: bool = False
     create_bucket: bool = False
     content: io.BytesIO | None = None
+    update_strategy: S3UpdateStrategy = S3UpdateStrategy.OVERWRITE
 
 
 S3DatasetSettingsType = TypeVar(
@@ -282,6 +312,10 @@ class S3Dataset(
         bucket, key = self._parse_s3_path(self.settings.path)
         s3_client = self._get_s3_client()
 
+        if self._contains_wildcard(key):
+            self.output = self._read_wildcard(s3_client, bucket, key, deserializer)
+            return
+
         # Decide whether the key is a single object or a prefix
         if self._is_object(s3_client, bucket, key):
             data = self._read_object(s3_client, bucket, key)
@@ -289,6 +323,76 @@ class S3Dataset(
         else:
             # treat as prefix (directory) - ensure prefix ends with '/'
             self.output = self._read_prefix(s3_client, bucket, key)
+
+    @staticmethod
+    def _contains_wildcard(value: str) -> bool:
+        return any(token in value for token in ("*", "?", "["))
+
+    @staticmethod
+    def _wildcard_list_prefix(pattern: str) -> str:
+        wildcard_positions = [idx for token in ("*", "?", "[") if (idx := pattern.find(token)) != -1]
+        if not wildcard_positions:
+            return pattern
+        prefix = pattern[: min(wildcard_positions)]
+        if "/" in prefix:
+            return f"{prefix.rsplit('/', 1)[0]}/"
+        return ""
+
+    def _list_matching_keys(self, s3_client: S3ClientProtocol, bucket: str, pattern: str) -> list[str]:
+        prefix = self._wildcard_list_prefix(pattern)
+        matches: list[str] = []
+        try:
+            paginator = s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []) or []:
+                    obj_key = obj.get("Key")
+                    if not obj_key or obj_key.endswith("/"):
+                        continue
+                    if fnmatchcase(obj_key, pattern):
+                        matches.append(obj_key)
+        except ClientError as exc:
+            logger.error("Failed to list objects for wildcard pattern s3://%s/%s: %s", bucket, pattern, exc)
+            raise ReadError(
+                message="Failed to list objects for wildcard S3 pattern",
+                details={"bucket": bucket, "pattern": pattern},
+            ) from exc
+
+        return sorted(matches)
+
+    def _read_wildcard(
+        self,
+        s3_client: S3ClientProtocol,
+        bucket: str,
+        pattern: str,
+        deserializer: PandasDeserializer,
+    ) -> pd.DataFrame:
+        keys = self._list_matching_keys(s3_client, bucket, pattern)
+        if not keys:
+            raise ReadError(
+                message="No objects matched wildcard S3 pattern.",
+                details={"bucket": bucket, "pattern": pattern},
+            )
+
+        dfs: list[pd.DataFrame] = []
+        for obj_key in keys:
+            data = self._read_object(s3_client, bucket, obj_key)
+            try:
+                dfs.append(deserializer(data))
+            except Exception as exc:
+                logger.error("Failed to deserialize S3 object s3://%s/%s: %s", bucket, obj_key, exc)
+                raise ReadError(
+                    message="Failed to deserialize S3 object in wildcard read",
+                    details={"bucket": bucket, "key": obj_key, "pattern": pattern},
+                ) from exc
+
+        try:
+            return pd.concat(dfs, ignore_index=True)
+        except Exception as exc:
+            logger.error("Failed to concatenate wildcard read dataframes for s3://%s/%s: %s", bucket, pattern, exc)
+            raise ReadError(
+                message="Failed to concatenate dataframes from wildcard S3 pattern",
+                details={"bucket": bucket, "pattern": pattern},
+            ) from exc
 
     def check_deserializer_exist(self) -> PandasDeserializer:
         deserializer = self.deserializer
@@ -365,7 +469,7 @@ class S3Dataset(
     def _read_prefix(self, s3_client: S3ClientProtocol, bucket: str, prefix: str) -> pd.DataFrame:
         """List objects under prefix and read all files, concatenating into a single DataFrame.
 
-        Returns an empty DataFrame if no files found.
+        Raises ReadError when no files are found.
         """
         deserializer = self.check_deserializer_exist()
         dfs: list[pd.DataFrame] = []
@@ -390,7 +494,10 @@ class S3Dataset(
             raise ReadError(message="Failed to list objects in S3 prefix", details={"bucket": bucket, "prefix": prefix}) from exc
 
         if not dfs:
-            return pd.DataFrame()
+            raise ReadError(
+                message="No objects found matching S3 prefix.",
+                details={"bucket": bucket, "prefix": prefix},
+            )
 
         try:
             return pd.concat(dfs, ignore_index=True)
@@ -425,8 +532,230 @@ class S3Dataset(
     def delete(self) -> NoReturn:
         raise NotSupportedError
 
-    def update(self) -> NoReturn:
-        raise NotSupportedError
+    def update(self) -> None:
+        """Update an existing S3 object.
+
+        Behaviour is controlled by ``settings.update_strategy``:
+
+        - ``OVERWRITE`` (default): replace the entire object with the new payload.
+          The target object must already exist.
+        - ``APPEND``: download the current object, deserialize it, concatenate the
+          new input rows, re-serialize and upload. Both serializer and deserializer
+          must be configured.
+
+        Accepts either ``self.input`` (DataFrame) or ``settings.content`` (BytesIO),
+        never both. ``settings.content`` is supported only for ``OVERWRITE``.
+        On success, ``self.output`` contains a one-row DataFrame built from the
+        S3 ``put_object`` response payload. When both are empty/None the method
+        returns without error (no-op).
+        """
+        logger.debug(
+            "Starting update operation for %s ;account: %s (strategy: %s)",
+            self.settings.path,
+            self.linked_service.settings.account_id,
+            self.settings.update_strategy,
+        )
+
+        if self._should_skip_update():
+            self.output = self._build_update_output()
+            return
+
+        bucket, key = self._parse_s3_path(self.settings.path, UpdateError)
+        self._validate_update_sources(bucket, key)
+        self._ensure_object_exists(bucket, key)
+
+        strategy = self.settings.update_strategy
+        if strategy == S3UpdateStrategy.OVERWRITE:
+            body = self._build_update_body(bucket, key)
+            response = self._upload_update_body(bucket, key, body)
+        elif strategy == S3UpdateStrategy.APPEND:
+            body = self._build_append_body(bucket, key)
+            response = self._upload_update_body(bucket, key, body)
+        else:
+            raise UpdateError(
+                message=f"Unknown update strategy: {strategy!r}",
+                details={"bucket": bucket, "key": key, "strategy": str(strategy)},
+            )
+
+        self.output = self._build_response_output(response)
+
+    def _should_skip_update(self) -> bool:
+        """Return True when update() has nothing to do under the contract."""
+        input_df = self._get_input_dataframe()
+        return self.settings.content is None and (input_df is None or input_df.empty)
+
+    def _build_update_output(self) -> pd.DataFrame:
+        """Return contract-aligned update output without mutating self.input."""
+        input_df = self._get_input_dataframe()
+        if input_df is None:
+            return pd.DataFrame()
+        return input_df.copy()
+
+    @staticmethod
+    def _build_response_output(payload: dict[str, Any]) -> pd.DataFrame:
+        """Return a one-row DataFrame from backend response payload."""
+        return pd.DataFrame([payload])
+
+    def _validate_update_sources(self, bucket: str, key: str) -> None:
+        """Validate mutually exclusive update sources: content vs input."""
+        input_df = self._get_input_dataframe()
+        has_input_payload = input_df is not None and not input_df.empty
+        if self.settings.content is not None and has_input_payload:
+            raise UpdateError(
+                message="Both settings.content and input are provided. Provide only one source.",
+                details={"bucket": bucket, "key": key},
+            )
+        if self.settings.content is not None and self.settings.update_strategy != S3UpdateStrategy.OVERWRITE:
+            raise UpdateError(
+                message="settings.content is supported only for OVERWRITE update strategy.",
+                details={"bucket": bucket, "key": key, "strategy": str(self.settings.update_strategy)},
+            )
+
+    def _ensure_object_exists(self, bucket: str, key: str) -> None:
+        """Assert the target S3 object exists; raise UpdateError if it does not."""
+        s3_client = self._get_s3_client(UpdateError)
+        try:
+            s3_client.head_object(Bucket=bucket, Key=key)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            not_found = status_code == 404 or error_code in ("404", "NotFound", "NoSuchKey")
+            if not_found:
+                raise UpdateError(
+                    message="Target object does not exist. update() requires an existing S3 object.",
+                    status_code=404,
+                    details={"bucket": bucket, "key": key},
+                ) from exc
+            raise UpdateError(
+                message="Unable to validate target object existence.",
+                details={"bucket": bucket, "key": key, "error_code": error_code},
+            ) from exc
+
+    def _build_update_body(self, bucket: str, key: str) -> bytes:
+        """Build upload body from settings.content or serialized input (OVERWRITE strategy)."""
+        if self.settings.content is not None:
+            return self.settings.content.getvalue()
+
+        if self.serializer is None:
+            raise UpdateError(
+                message="Serializer is not initialized.",
+                status_code=400,
+                details={"path": getattr(self.settings, "path", None)},
+            )
+
+        input_df = self._get_input_dataframe()
+        if input_df is None:
+            raise UpdateError(
+                message="Input is None. Provide input DataFrame or settings.content.",
+                status_code=400,
+                details={"bucket": bucket, "key": key},
+            )
+
+        try:
+            serialized = self.serializer(input_df)
+        except Exception as exc:
+            raise UpdateError(
+                message="Failed to serialize input for S3 upload.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
+
+        if isinstance(serialized, str):
+            return serialized.encode("utf-8")
+        if isinstance(serialized, (bytes, bytearray)):
+            return bytes(serialized)
+
+        raise UpdateError(
+            message="Unsupported serialized payload type for S3 upload.",
+            details={"type": type(serialized).__name__, "bucket": bucket, "key": key},
+        )
+
+    def _build_append_body(self, bucket: str, key: str) -> bytes:
+        """Build upload body for the APPEND strategy.
+
+        Downloads the existing object, deserializes it, concatenates the new
+        input rows, then re-serializes the combined result.
+
+        Raises UpdateError if serializer/deserializer are missing or input is absent.
+        """
+        if self.serializer is None:
+            raise UpdateError(
+                message="Serializer is not initialized. APPEND strategy requires a serializer.",
+                status_code=400,
+                details={"path": getattr(self.settings, "path", None)},
+            )
+        if self.deserializer is None:
+            raise UpdateError(
+                message="Deserializer is not initialized. APPEND strategy requires a deserializer.",
+                status_code=400,
+                details={"path": getattr(self.settings, "path", None)},
+            )
+
+        s3_client = self._get_s3_client(UpdateError)
+
+        # Download and deserialize the existing object.
+        try:
+            existing_bytes = self._read_object(s3_client, bucket, key)
+        except ReadError as exc:
+            raise UpdateError(
+                message="Failed to download existing object for APPEND.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
+
+        try:
+            existing_df = self.deserializer(existing_bytes)
+        except Exception as exc:
+            raise UpdateError(
+                message="Failed to deserialize existing S3 object for APPEND.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
+
+        input_df = self._get_input_dataframe()
+        if input_df is None:
+            raise UpdateError(
+                message="Input is None. APPEND strategy requires input DataFrame.",
+                status_code=400,
+                details={"bucket": bucket, "key": key},
+            )
+        new_df = input_df
+
+        # Concatenate and re-serialize.
+        try:
+            combined = pd.concat([existing_df, new_df], ignore_index=True)
+        except Exception as exc:
+            raise UpdateError(
+                message="Failed to concatenate existing and new DataFrames for APPEND.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
+
+        try:
+            serialized = self.serializer(combined)
+        except Exception as exc:
+            raise UpdateError(
+                message="Failed to serialize combined DataFrame for APPEND.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
+
+        if isinstance(serialized, str):
+            return serialized.encode("utf-8")
+        if isinstance(serialized, (bytes, bytearray)):
+            return bytes(serialized)
+
+        raise UpdateError(
+            message="Unsupported serialized payload type for S3 APPEND upload.",
+            details={"type": type(serialized).__name__, "bucket": bucket, "key": key},
+        )
+
+    def _upload_update_body(self, bucket: str, key: str, body: bytes) -> dict[str, Any]:
+        """Overwrite the existing S3 object with new bytes and return response payload."""
+        s3_client = self._get_s3_client(UpdateError)
+        try:
+            return s3_client.put_object(Bucket=bucket, Key=key, Body=body)
+        except ClientError as exc:
+            logger.error("Failed to overwrite object s3://%s/%s: %s", bucket, key, exc)
+            raise UpdateError(
+                message="Failed to overwrite object in S3.",
+                details={"bucket": bucket, "key": key},
+            ) from exc
 
     def purge(self) -> None:
         """Remove a single object, a prefix/directory, or an entire bucket.
@@ -460,7 +789,12 @@ class S3Dataset(
 
                 keys = self._list_keys_for_prefix(s3_client, bucket, "")
                 self._delete_keys(s3_client, bucket, keys)
-                s3_client.delete_bucket(Bucket=bucket)
+                try:
+                    s3_client.delete_bucket(Bucket=bucket)
+                except ClientError as exc:
+                    error_code = exc.response.get("Error", {}).get("Code", "")
+                    if error_code not in ("NoSuchBucket", "404"):
+                        raise
                 self.output = pd.DataFrame()
                 return
             else:
@@ -477,21 +811,31 @@ class S3Dataset(
             raise
         except ClientError as exc:
             logger.error("Failed to purge path %s: %s", path, exc)
-            raise PurgeError(message="Failed to purge S3 path", details={"path": path}) from exc
+            raise PurgeError(message=f"Failed to purge S3 path: {exc}", details={"path": path}) from exc
         except Exception as exc:
             logger.error("Unexpected error during purge for %s: %s", path, exc)
             raise PurgeError(message="Unexpected purge failure", details={"path": path}) from exc
 
     @staticmethod
     def _list_keys_for_prefix(s3_client: S3ClientProtocol, bucket: str, prefix: str) -> list[str]:
-        """List all object keys in bucket under prefix."""
+        """List all object keys in bucket under prefix.
+
+        Returns an empty list when the bucket does not exist -- a non-existent
+        bucket is treated as already empty, consistent with purge() idempotency.
+        """
         keys: list[str] = []
         paginator = s3_client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-            for obj in page.get("Contents", []) or []:
-                key = obj.get("Key")
-                if key:
-                    keys.append(key)
+        try:
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []) or []:
+                    key = obj.get("Key")
+                    if key:
+                        keys.append(key)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code in ("NoSuchBucket", "404"):
+                return []
+            raise
         return keys
 
     @staticmethod
@@ -539,10 +883,13 @@ class S3Dataset(
         rows: list[dict[str, Any]] = []
         try:
             paginator = s3_client.get_paginator("list_objects_v2")
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            list_prefix = self._wildcard_list_prefix(prefix) if self._contains_wildcard(prefix) else prefix
+            for page in paginator.paginate(Bucket=bucket, Prefix=list_prefix):
                 for obj in page.get("Contents", []) or []:
                     obj_key = obj.get("Key")
                     if not obj_key or obj_key.endswith("/"):
+                        continue
+                    if self._contains_wildcard(prefix) and not fnmatchcase(obj_key, prefix):
                         continue
 
                     try:

@@ -108,8 +108,10 @@ class AWSLinkedService(LinkedService[AWSLinkedServiceSettingsType], Generic[AWSL
 
         if actual_account_id != self.settings.account_id:
             raise AuthorizationError(
-                message=f"Unable to verify AWS account ID. "
-                f"{actual_account_id} does not match expected value: {self.settings.account_id}",
+                message=(
+                    "Unable to verify AWS account ID. "
+                    f"{actual_account_id} does not match expected value: {self.settings.account_id}"
+                ),
                 details={
                     "type": self.type.value,
                     "expected_account_id": self.settings.account_id,

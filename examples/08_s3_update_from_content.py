@@ -1,10 +1,21 @@
+import io
 from uuid import UUID
 
-from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings
+import pandas as pd
+
+from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings, S3UpdateStrategy
 from ds_provider_aws_py_lib.linked_service import AWSLinkedService, AWSLinkedServiceSettings
 
 
 def main():
+    df = pd.DataFrame(
+        {
+            "id": [7, 2, 3],
+            "name": ["Alice", "Bob", "Charlie"],
+            "age": [25, 30, 35],
+        }
+    )
+    dataframe_as_binary: io.BytesIO = io.BytesIO(df.to_csv(index=False).encode("utf-8"))
     linked_service = AWSLinkedService(
         id=UUID("00000000-0000-0000-0000-000000000000"),
         name="test-name",
@@ -13,18 +24,25 @@ def main():
             account_id="...",
             access_key_id="...",
             access_key_secret="...",
-            region="us-west-2",
+            region="us-east-1",
         ),
     )
     dataset = S3Dataset(
         id=UUID("00000000-0000-0000-0000-000000000001"),
         name="test-s3-dataset",
         version="1.0.0",
-        settings=S3DatasetSettings(path="s3://daas-service-sandbox/reports/integrity_checking/*.csv"),
+        settings=S3DatasetSettings(
+            path="s3://kuba-test-package/test3/test10.csv",
+            content=dataframe_as_binary,
+            update_strategy=S3UpdateStrategy.OVERWRITE,
+        ),
         linked_service=linked_service,
     )
     linked_service.connect()
-    dataset.read()
+
+    dataset.update()
     print(dataset.output)
+
+
 if __name__ == "__main__":
     main()
