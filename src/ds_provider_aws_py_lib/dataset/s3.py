@@ -821,7 +821,7 @@ class S3Dataset(
             if not key:
                 if not self.settings.purge.remove_bucket:
                     raise PurgeError(
-                        message="Bucket purge is disabled. Set settings.remove_bucket=True to allow it.",
+                        message="Bucket purge is disabled. Set settings.purge.remove_bucket=True to allow it.",
                         details={"bucket": bucket, "path": path},
                     )
 
