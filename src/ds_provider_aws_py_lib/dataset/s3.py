@@ -815,7 +815,7 @@ class S3Dataset(
         bucket, key = self._resolve_bucket_key(PurgeError, allow_bucket_only=True)
 
         try:
-            s3_client = self._get_s3_client()
+            s3_client = self._get_s3_client(PurgeError)
             delete_responses: list[dict[str, Any]] = []
             delete_bucket_response: dict[str, Any] | None = None
             if not key:
