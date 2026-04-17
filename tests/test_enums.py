@@ -34,3 +34,10 @@ def test_resource_type_enum_comparison() -> None:
     It supports equality comparison with strings.
     """
     assert ResourceType.LINKED_SERVICE == "ds.resource.linked-service.aws"
+
+
+def test_s3_type_enum_comparison() -> None:
+    """
+    It supports equality comparison with strings.
+    """
+    assert ResourceType.S3_DATASET == "ds.resource.dataset.s3"
