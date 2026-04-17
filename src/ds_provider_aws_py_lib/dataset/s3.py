@@ -103,6 +103,11 @@ class PurgeSettings:
 
 
 @dataclass(kw_only=True)
+class ListSettings:
+    download_file: bool = True
+
+
+@dataclass(kw_only=True)
 class S3DatasetSettings(DatasetSettings):
     """Settings for S3 dataset operations.
 
@@ -114,6 +119,7 @@ class S3DatasetSettings(DatasetSettings):
         update: Settings used by update().
         rename: Settings used by rename().
         purge: Settings used by purge().
+        list: Settings used by list().
     """
 
     bucket: str | None = None
@@ -122,6 +128,7 @@ class S3DatasetSettings(DatasetSettings):
     update: UpdateSettings = field(default_factory=UpdateSettings)
     rename: RenameSettings = field(default_factory=RenameSettings)
     purge: PurgeSettings = field(default_factory=PurgeSettings)
+    list: ListSettings = field(default_factory=ListSettings)
 
 
 S3DatasetSettingsType = TypeVar(
@@ -912,9 +919,9 @@ class S3Dataset(
     def list(self) -> None:
         """List objects for the configured S3 location and set self.output.
 
-        The resulting DataFrame contains two columns:
-        - metadata: dict with object metadata (name, path, key, bucket, etc.)
-        - content: object bytes
+        Output columns depend on ``settings.list.download_file``:
+        - True: ``metadata`` and ``content`` (object bytes)
+        - False: ``metadata`` only
         """
         logger.debug(
             "Listing objects for %s ;account: %s",
@@ -923,6 +930,7 @@ class S3Dataset(
         )
 
         bucket, prefix = self._resolve_bucket_key(ListError, allow_bucket_only=True)
+        download_file = self.settings.list.download_file
 
         s3_client = self._get_s3_client(ListError)
 
@@ -938,14 +946,6 @@ class S3Dataset(
                     if self._contains_wildcard(prefix) and not fnmatchcase(obj_key, prefix):
                         continue
 
-                    try:
-                        content = self._read_object(s3_client, bucket, obj_key)
-                    except ReadError as exc:
-                        raise ListError(
-                            message="Failed to read object content while listing",
-                            details={"bucket": bucket, "prefix": prefix, "key": obj_key},
-                        ) from exc
-
                     metadata = {
                         "name": obj_key.rsplit("/", 1)[-1],
                         "path": f"s3://{bucket}/{obj_key}",
@@ -956,7 +956,18 @@ class S3Dataset(
                         "last_modified": obj.get("LastModified"),
                         "storage_class": obj.get("StorageClass"),
                     }
-                    rows.append({"metadata": metadata, "content": content})
+
+                    if download_file:
+                        try:
+                            content = self._read_object(s3_client, bucket, obj_key)
+                        except ReadError as exc:
+                            raise ListError(
+                                message="Failed to read object content while listing",
+                                details={"bucket": bucket, "prefix": prefix, "key": obj_key},
+                            ) from exc
+                        rows.append({"metadata": metadata, "content": content})
+                    else:
+                        rows.append({"metadata": metadata})
         except ClientError as exc:
             logger.error("Failed to list objects in s3://%s/%s: %s", bucket, prefix, exc)
             raise ListError(
@@ -964,7 +975,8 @@ class S3Dataset(
                 details={"bucket": bucket, "prefix": prefix},
             ) from exc
 
-        self.output = pd.DataFrame(rows, columns=["metadata", "content"])
+        columns = ["metadata", "content"] if download_file else ["metadata"]
+        self.output = pd.DataFrame(rows, columns=columns)
 
     def rename(self) -> None:
         """Rename an S3 object from ``settings.key`` to ``settings.rename.new_file_path``.

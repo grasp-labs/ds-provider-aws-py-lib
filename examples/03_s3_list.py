@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from ds_provider_aws_py_lib.dataset import S3Dataset, S3DatasetSettings
+from ds_provider_aws_py_lib.dataset.s3 import ListSettings
 from ds_provider_aws_py_lib.linked_service import AWSLinkedService, AWSLinkedServiceSettings
 
 
@@ -20,7 +21,7 @@ def main():
         id=UUID("00000000-0000-0000-0000-000000000001"),
         name="test-s3-dataset",
         version="1.0.0",
-        settings=S3DatasetSettings(bucket="test-package", key="*/*.csv"),
+        settings=S3DatasetSettings(bucket="kuba-test-package", key="*/*.csv", list=ListSettings(download_file=False)),
         linked_service=linked_service,
     )
     linked_service.connect()

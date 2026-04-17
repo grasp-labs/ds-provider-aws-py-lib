@@ -11,6 +11,7 @@ from ds_resource_plugin_py_lib.common.resource.dataset.errors import CreateError
 
 from ds_provider_aws_py_lib.dataset.s3 import (
     CreateSettings,
+    ListSettings,
     RenameSettings,
     S3Dataset,
     S3DatasetSettings,
@@ -68,6 +69,7 @@ class FakeS3Client:
         self.put_calls: list[dict] = []
         self.copy_calls: list[dict] = []
         self.delete_calls: list[dict] = []
+        self.get_object_calls: list[dict] = []
 
     def head_bucket(self, Bucket: str) -> dict:
         return {"Bucket": Bucket}
@@ -95,6 +97,7 @@ class FakeS3Client:
         return FakePaginator(self.pages)
 
     def get_object(self, Bucket: str, Key: str) -> dict:
+        self.get_object_calls.append({"Bucket": Bucket, "Key": Key})
         return {"Body": io.BytesIO(self.bodies[Key])}
 
     def copy_object(self, *, Bucket: str, Key: str, CopySource: dict[str, str]) -> dict:
@@ -137,6 +140,7 @@ def make_dataset(
     create: CreateSettings | None = None,
     update: UpdateSettings | None = None,
     rename: RenameSettings | None = None,
+    list_settings: ListSettings | None = None,
 ) -> S3Dataset:
     return S3Dataset(
         id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -148,6 +152,7 @@ def make_dataset(
             create=create or CreateSettings(),
             update=update or UpdateSettings(),
             rename=rename or RenameSettings(),
+            list=list_settings or ListSettings(),
         ),
         linked_service=make_linked_service(),
     )
@@ -202,6 +207,38 @@ def test_list_wraps_missing_connection_as_list_error():
 
     with pytest.raises(ListError, match="Unable to acquire S3 client"):
         dataset.list()
+
+
+def test_list_downloads_content_by_default():
+    pages = [{"Contents": [{"Key": "reports/a.csv", "Size": 10}]}]
+    bodies = {"reports/a.csv": b"id,name\n1,Alice\n"}
+    client = FakeS3Client(pages=pages, bodies=bodies)
+    dataset = make_dataset(key="reports/")
+    dataset.linked_service._connection = FakeSession(client=client)
+
+    dataset.list()
+
+    assert len(client.get_object_calls) == 1
+    assert list(dataset.output.columns) == ["metadata", "content"]
+    assert dataset.output.iloc[0]["content"] == b"id,name\n1,Alice\n"
+    metadata = dataset.output.iloc[0]["metadata"]
+    assert metadata["key"] == "reports/a.csv"
+    assert metadata["path"] == "s3://bucket/reports/a.csv"
+
+
+def test_list_without_download_file_returns_metadata_only():
+    pages = [{"Contents": [{"Key": "reports/a.csv", "Size": 10}]}]
+    client = FakeS3Client(pages=pages, bodies={})
+    dataset = make_dataset(key="reports/", list_settings=ListSettings(download_file=False))
+    dataset.linked_service._connection = FakeSession(client=client)
+
+    dataset.list()
+
+    assert len(client.get_object_calls) == 0
+    assert list(dataset.output.columns) == ["metadata"]
+    assert "content" not in dataset.output.columns
+    metadata = dataset.output.iloc[0]["metadata"]
+    assert metadata["key"] == "reports/a.csv"
 
 
 def test_read_supports_wildcard_pattern_and_concatenates_matches():
