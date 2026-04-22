@@ -18,3 +18,4 @@ class ResourceType(StrEnum):
     """
 
     LINKED_SERVICE = "ds.resource.linked-service.aws"
+    S3_DATASET = "ds.resource.dataset.s3"
