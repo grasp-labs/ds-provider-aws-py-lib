@@ -180,6 +180,7 @@ class S3Dataset(
 
         bucket, key = self._resolve_bucket_key(CreateError)
 
+        self._validate_create_target_key(bucket, key)
         self._validate_create_sources(bucket, key)
         self._ensure_bucket_exists(bucket)
         self._ensure_directory_exists(bucket, key)
@@ -204,6 +205,23 @@ class S3Dataset(
         if input_df is None:
             return pd.DataFrame()
         return input_df.copy()
+
+    def _validate_create_target_key(self, bucket: str, key: str) -> None:
+        """Validate that create() targets a concrete object key."""
+        violations: list[str] = []
+
+        if not key:
+            violations.append("empty")
+        if key.endswith("/"):
+            violations.append("trailing_slash")
+        if self._contains_wildcard(key):
+            violations.append("wildcard")
+
+        if violations:
+            raise CreateError(
+                message="create() requires a concrete S3 object key: non-empty, no trailing '/', and no wildcard tokens.",
+                details={"bucket": bucket, "key": key, "violations": violations},
+            )
 
     def _validate_create_sources(self, bucket: str, key: str) -> None:
         """Validate mutually exclusive create sources: content vs input."""

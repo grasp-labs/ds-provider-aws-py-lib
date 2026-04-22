@@ -237,6 +237,45 @@ def test_create_helpers_cover_error_paths() -> None:
         dataset._build_create_body("bucket", "file.csv")
 
 
+@pytest.mark.parametrize(
+    ("key", "expected_violations"),
+    [
+        ("", ["empty"]),
+        ("folder/", ["trailing_slash"]),
+        ("reports/*.csv", ["wildcard"]),
+        ("reports/file?.csv", ["wildcard"]),
+        ("reports/[ab].csv", ["wildcard"]),
+    ],
+)
+def test_validate_create_target_key_rejects_invalid_keys(key: str, expected_violations: list[str]) -> None:
+    dataset = make_dataset()
+
+    with pytest.raises(CreateError, match="requires a concrete S3 object key") as exc_info:
+        dataset._validate_create_target_key("bucket", key)
+
+    assert exc_info.value.details["bucket"] == "bucket"
+    assert exc_info.value.details["key"] == key
+    assert exc_info.value.details["violations"] == expected_violations
+
+
+def test_validate_create_target_key_accepts_concrete_key() -> None:
+    dataset = make_dataset()
+    dataset._validate_create_target_key("bucket", "reports/file.csv")
+
+
+def test_create_rejects_invalid_target_key_before_backend_calls() -> None:
+    dataset = make_dataset(key="folder/")
+    dataset.input = pd.DataFrame({"id": [1]})
+    client = ConfigurableS3Client()
+    dataset.linked_service._connection = FakeSession(client)
+
+    with pytest.raises(CreateError, match="requires a concrete S3 object key"):
+        dataset.create()
+
+    assert client.create_bucket_calls == 0
+    assert client.put_calls == []
+
+
 def test_create_output_and_upload_and_existence_checks() -> None:
     dataset = make_dataset()
     dataset.input = None  # type: ignore[assignment]
