@@ -8,3 +8,10 @@ linked_service:
     version: 1.0.0
     description: AWS linked service
     class_name: ds_provider_aws_py_lib.linked_service.aws.AWSLinkedService
+
+dataset:
+  - name: S3Dataset
+    type: ds.resource.dataset.s3
+    version: 1.0.0
+    description: S3 dataset
+    class_name: ds_provider_aws_py_lib.dataset.s3.S3Dataset
