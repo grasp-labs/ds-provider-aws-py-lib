@@ -259,7 +259,7 @@ class AWSIAMRoleLinkedService(
         try:
             self.connect()
             return True, "Connection successfully tested"
-        except ClientError as exc:
+        except (ClientError, AuthorizationError) as exc:
             return False, str(exc)
 
     def close(self) -> None:
