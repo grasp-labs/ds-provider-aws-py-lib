@@ -28,10 +28,18 @@ Example:
 """
 
 from .aws import AWSIAMRoleLinkedService, AWSIAMRoleLinkedServiceSettings, AWSLinkedService, AWSLinkedServiceSettings
+from .tenant_partition import (
+    TenantPartitionAdminLinkedService,
+    TenantPartitionReaderLinkedService,
+    TenantPartitionSettings,
+)
 
 __all__ = [
     "AWSIAMRoleLinkedService",
     "AWSIAMRoleLinkedServiceSettings",
     "AWSLinkedService",
     "AWSLinkedServiceSettings",
+    "TenantPartitionReaderLinkedService",
+    "TenantPartitionAdminLinkedService",
+    "TenantPartitionSettings",
 ]

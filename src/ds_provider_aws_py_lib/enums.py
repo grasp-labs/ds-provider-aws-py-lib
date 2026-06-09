@@ -18,3 +18,5 @@ class ResourceType(StrEnum):
     """
 
     LINKED_SERVICE = "ds.resource.linked-service.aws"
+    TENANT_PARTITION_READER_LINKED_SERVICE = "ds.resource.linked-service.tenant-partition-reader"
+    TENANT_PARTITION_ADMIN_LINKED_SERVICE = "ds.resource.linked-service.tenant-partition-admin"

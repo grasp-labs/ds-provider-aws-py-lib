@@ -8,3 +8,15 @@ linked_service:
     version: 1.0.0
     description: AWS linked service
     class_name: ds_provider_aws_py_lib.linked_service.aws.AWSLinkedService
+
+  - name: TenantPartitionReader
+    type: ds.resource.linked-service.tenant-partition-reader
+    version: 1.0.0
+    description: Read-only access to a tenant's S3 partition bucket via IAM role assumption
+    class_name: ds_provider_aws_py_lib.linked_service.tenant_partition.TenantPartitionReaderLinkedService
+
+  - name: TenantPartitionAdmin
+    type: ds.resource.linked-service.tenant-partition-admin
+    version: 1.0.0
+    description: Admin access to a tenant's S3 partition bucket via IAM role assumption
+    class_name: ds_provider_aws_py_lib.linked_service.tenant_partition.TenantPartitionAdminLinkedService
